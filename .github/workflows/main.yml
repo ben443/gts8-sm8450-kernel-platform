@@ -1,0 +1,129 @@
+name: Kernel Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 10G
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install base dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl file flex gawk git kmod \
+            libelf-dev libssl-dev lz4 python3 rsync sed unzip xz-utils zstd
+
+      - name: Verify required files
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f ./build_kernel_GKI.sh
+          test -f ./Makefile
+          test -d ./arch
+
+      - name: Restore caches (ccache + toolchain/prebuilts)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ccache
+            prebuilts/**
+            toolchains/**
+          key: ${{ runner.os }}-kernel-${{ github.ref_name }}-${{ hashFiles('gki_build.sh', '**/build.config*', '**/Makefile', '**/Kconfig') }}
+          restore-keys: |
+            ${{ runner.os }}-kernel-${{ github.ref_name }}-
+            ${{ runner.os }}-kernel-main-
+            ${{ runner.os }}-kernel-
+
+      - name: Prepare ccache
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --set-config=max_size="$CCACHE_MAXSIZE" || true
+          ccache --set-config=compression=true || true
+          ccache -z || true
+          ccache -s || true
+
+      - name: Validate build script (syntax + shebang)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          head -n1 ./build_kernel_GKI.sh
+          bash -n ../build_kernel_GKI.sh
+          chmod +x ./build_kernel_GKI.sh
+      - name: Build kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export USE_CCACHE=1
+          export CCACHE_EXEC="$(command -v ccache || true)"
+          export CC="ccache gcc"
+          export CXX="ccache g++"
+          ./build_kernel_GKI.sh
+
+      - name: Verify expected outputs exist
+        shell: bash
+        run: |
+          set -euxo pipefail
+          found=0
+          for p in out dist arch/arm64/boot; do
+            if [[ -e "$p" ]]; then
+              found=1
+            fi
+          done
+          if [[ "$found" -ne 1 ]]; then
+            echo "Build finished but no expected output paths found (out/, dist/, arch/arm64/boot/)." >&2
+            exit 1
+          fi
+
+      - name: Show ccache stats
+        if: always()
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ccache -s || true
+
+      - name: Upload build logs (best effort)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-logs
+          if-no-files-found: warn
+          path: |
+            **/*.log
+            out/**/*.log
+            dist/**/*.log
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-artifacts
+          if-no-files-found: warn
+          path: |
+            out/**
+            dist/**
+            arch/arm64/boot/**
