@@ -1,4 +1,8 @@
 #!/bin/bash
+set -euo pipefail
+
+BUILD_TARGET="${BUILD_TARGET:-gts8wifi_eur_open}"
+cd "$(dirname "$(readlink -f "$0")")"
 
 #1. target config
 BUILD_TARGET=gts8wifi_eur_open
