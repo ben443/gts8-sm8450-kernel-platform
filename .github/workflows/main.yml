@@ -7,10 +7,18 @@ on:
         description: "Samsung build target"
         required: false
         default: "gts8wifi_eur_open"
-      clean_build:
-        description: "Wipe out/ before building"
-        type: boolean
+      lto:
+        description: "LTO mode (thin is ~3x faster to build)"
+        type: choice
+        options: [thin, full, none]
+        default: thin
+      jobs:
+        description: "make -j level (lower this if the link OOMs)"
         required: false
+        default: "4"
+      clean_build:
+        description: "Wipe out/ and device/qcom/*-kernel first"
+        type: boolean
         default: false
   push:
     branches: [ "main" ]
@@ -38,23 +46,16 @@ jobs:
     steps:
       - name: Reclaim disk space
         run: |
-          echo "=== before ==="
           df -h /
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /usr/local/share/boost \
-            /usr/local/lib/node_modules \
-            /opt/hostedtoolcache/CodeQL \
-            /usr/share/swift \
-            /usr/local/.ghcup || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/lib/node_modules \
+                      /opt/hostedtoolcache/CodeQL /usr/share/swift \
+                      /usr/local/.ghcup || true
           sudo docker image prune -a -f || true
           sudo apt-get clean
-          echo "=== after ==="
           df -h /
 
-      - name: Add swap (8G)
+      - name: Add swap (8G on /mnt)
         run: |
           sudo fallocate -l 8G /mnt/swapfile
           sudo chmod 600 /mnt/swapfile
@@ -80,176 +81,211 @@ jobs:
             python3 python3-pip python-is-python3 jq ca-certificates \
             dwarves cpio kmod device-tree-compiler
           git lfs install || true
-          echo "--- versions ---"
-          bison --version | head -1
-          flex --version
-          pahole --version || true
+          # prepare_vendor.sh rel_path() calls `python`, not `python3`
+          python --version
 
       - name: Verify repository layout
         shell: bash
         run: |
           set +e
           FAIL=0
-          echo "=== top level ==="
-          ls -la
+          note() { echo "  $1 $2"; }
 
-          echo
-          echo "=== kernel_platform ==="
-          if [ -d kernel_platform ]; then
-            ls -d kernel_platform/*/ 2>/dev/null
-          else
-            echo "MISSING: kernel_platform/"; FAIL=1
-          fi
+          echo "=== top level ==="; ls -la
 
-          echo
-          echo "=== vendor tree (must be SIBLING of kernel_platform) ==="
-          if [ -d vendor/qcom/opensource ]; then
-            ls -d vendor/qcom/opensource/*/ 2>/dev/null
-          else
-            echo "MISSING: vendor/qcom/opensource/"; FAIL=1
-          fi
+          echo; echo "=== required paths ==="
+          for p in kernel_platform \
+                   kernel_platform/build/android/prepare_vendor.sh \
+                   kernel_platform/build/build.sh \
+                   kernel_platform/build/brunch \
+                   kernel_platform/build/_setup_env.sh \
+                   build_kernel_GKI.sh; do
+            [ -e "$p" ] && note OK "$p" || { note MISSING "$p"; FAIL=1; }
+          done
 
-          echo
-          echo "=== required DLKM sources ==="
+          echo; echo "=== vendor DLKM sources (must be SIBLING of kernel_platform) ==="
           for m in datarmnet-ext/wlan datarmnet/core mmrm-driver \
                    audio-kernel camera-kernel display-drivers/msm; do
-            if [ -d "vendor/qcom/opensource/$m" ]; then
-              echo "  OK      vendor/qcom/opensource/$m"
-            else
-              echo "  MISSING vendor/qcom/opensource/$m"; FAIL=1
-            fi
+            d="vendor/qcom/opensource/$m"
+            [ -d "$d" ] && note OK "$d" || { note MISSING "$d"; FAIL=1; }
           done
 
-          echo
-          echo "=== build scripts ==="
-          for f in build_kernel_GKI.sh kernel_platform/build/android/prepare_vendor.sh; do
-            [ -f "$f" ] && echo "  OK      $f" || { echo "  MISSING $f"; FAIL=1; }
-          done
-
-          echo
-          if [ "$FAIL" != "0" ]; then
-            echo "::error::Repository layout is incomplete - see list above"
-            exit 1
+          echo; echo "=== Android integration stage prerequisites ==="
+          if [ -d bionic/libc/kernel/uapi ]; then
+            echo "  bionic/ present - prepare_vendor.sh WILL run export_headers.py,"
+            echo "  build_module.sh and merge_dtbs.sh, and will DELETE Android.mk/bp"
+            echo "  files under kernel_platform/."
+          else
+            echo "  bionic/ absent - build_kernel_GKI.sh will unset ANDROID_PRODUCT_OUT"
+            echo "  and skip that stage. This is expected for a kernel-only repo."
           fi
-          echo "Layout OK"
+
+          [ "$FAIL" != "0" ] && { echo "::error::Layout incomplete"; exit 1; }
+          echo; echo "Layout OK"
+
+      - name: Validate brunch target 'sec gki'
+        shell: bash
+        run: |
+          set +e
+          echo "=== available build configs ==="
+          find kernel_platform -maxdepth 2 -name "build.config*" \
+            -not -path "*/out/*" 2>/dev/null | sort | head -40
+          echo
+          echo "=== configs matching sec / gki ==="
+          find kernel_platform -maxdepth 2 -name "build.config*sec*" \
+            -o -maxdepth 2 -name "build.config*gki*" 2>/dev/null | sort
+          echo
+          if ! find kernel_platform -maxdepth 2 -name "build.config*sec*" \
+               2>/dev/null | grep -q .; then
+            echo "::warning::No build.config*sec* found. prepare_vendor.sh is invoked as 'sec gki' (KERNEL_TARGET=sec, KERNEL_VARIANT=gki) and build/brunch must be able to resolve it."
+          fi
+
+      - name: Inspect build configuration
+        shell: bash
+        run: |
+          set +e
+          grep -rhn "^\s*$$HERMETIC_TOOLCHAIN\|ADDITIONAL_HOST_TOOLS\|KERNEL_DIR\|LTO\|GKI_BUILD_CONFIG\|DEFCONFIG\|CLANG_VERSION\|MAKE_GOALS\|SKIP_CP_KERNEL_HDR$$=" \
+            kernel_platform/build/ kernel_platform/*/build.config* 2>/dev/null \
+            | grep -v "^Binary" | sort -u | head -40
+
+          echo
+          if grep -rq "HERMETIC_TOOLCHAIN=1" kernel_platform/build/ \
+               kernel_platform/*/build.config* 2>/dev/null; then
+            echo "::warning::HERMETIC_TOOLCHAIN=1 - apt-installed host tools are IGNORED; prebuilts are mandatory."
+          fi
+          if grep -rq "SKIP_CP_KERNEL_HDR" kernel_platform/*/build.config* 2>/dev/null; then
+            echo "::warning::SKIP_CP_KERNEL_HDR is referenced. prepare_vendor.sh unconditionally copies kernel-uapi-headers.tar.gz and will fail under set -e if it is absent."
+          fi
 
       - name: Check for prebuilt toolchain
         id: toolchain
         shell: bash
         run: |
           set +e
-          CLANG_DIR=$(ls -d kernel_platform/prebuilts/clang/host/linux-x86/clang-* 2>/dev/null | tail -1)
-          if [ -n "$CLANG_DIR" ] && [ -x "$CLANG_DIR/bin/clang" ]; then
-            echo "Found: $CLANG_DIR"
-            "$CLANG_DIR/bin/clang" --version | head -2
+          C=$(ls -d kernel_platform/prebuilts/clang/host/linux-x86/clang-* 2>/dev/null | tail -1)
+          if [ -n "$C" ] && [ -x "$C/bin/clang" ]; then
+            echo "found: $C"; "$C/bin/clang" --version | head -2
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::No clang under kernel_platform/prebuilts/clang/host/linux-x86/"
+            echo "::warning::no vendored clang"
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "--- other prebuilts ---"
-          for p in build-tools kernel-build-tools gcc/linux-x86 \
-                   clang-tools bison flex; do
+          for p in build-tools kernel-build-tools; do
             [ -e "kernel_platform/prebuilts/$p" ] \
-              && echo "  OK      prebuilts/$p" \
-              || echo "  MISSING prebuilts/$p"
+              && echo "  OK      prebuilts/$p" || echo "  MISSING prebuilts/$p"
           done
+          [ -e kernel_platform/tools/mkbootimg ] \
+            && echo "  OK      tools/mkbootimg" || echo "  MISSING tools/mkbootimg"
 
-      # Only runs if the tree does NOT vendor its own clang.
-      # Adjust the branch/tag to match your kernel's expected clang revision.
-      - name: Fetch AOSP toolchain (fallback)
+      - name: Fetch AOSP prebuilts (fallback)
         if: steps.toolchain.outputs.present == 'false'
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p kernel_platform/prebuilts/clang/host/linux-x86
-          git clone --depth 1 -b android14-release \
-            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-            /tmp/aosp-clang
-          rsync -a /tmp/aosp-clang/ kernel_platform/prebuilts/clang/host/linux-x86/
-          rm -rf /tmp/aosp-clang/.git
-
-          for repo in build-tools kernel-build-tools; do
-            if [ ! -d "kernel_platform/prebuilts/$repo" ]; then
-              git clone --depth 1 -b android14-release \
-                "https://android.googlesource.com/platform/prebuilts/$repo" \
-                "kernel_platform/prebuilts/$repo"
-              rm -rf "kernel_platform/prebuilts/$repo/.git"
-            fi
-          done
+          B=android14-release
+          KP=kernel_platform
+          clone() {
+            [ -e "$2" ] && { echo "exists: $2"; return; }
+            mkdir -p "$(dirname "$2")"
+            git clone --depth 1 -b "$B" "$1" "$2"
+            rm -rf "$2/.git"
+          }
+          clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$KP/prebuilts/clang/host/linux-x86"
+          clone https://android.googlesource.com/platform/prebuilts/build-tools           "$KP/prebuilts/build-tools"
+          clone https://android.googlesource.com/kernel/prebuilts/build-tools             "$KP/prebuilts/kernel-build-tools"
+          clone https://android.googlesource.com/platform/system/tools/mkbootimg          "$KP/tools/mkbootimg"
           df -h /
 
       - name: Make scripts executable
         run: |
           chmod +x build_kernel_GKI.sh
-          chmod +x kernel_platform/build/android/prepare_vendor.sh
+          chmod +x kernel_platform/build/brunch || true
           find kernel_platform/build -name "*.sh" -exec chmod +x {} \; || true
+          find kernel_platform/build -name "*.py" -exec chmod +x {} \; || true
 
-      - name: Clean out/ (optional)
+      - name: Clean (optional)
         if: github.event.inputs.clean_build == 'true'
-        run: rm -rf out/
+        run: rm -rf out/ device/qcom/*-kernel
 
-      # SINGLE build invocation. build_kernel_GKI.sh internally calls
-      # prepare_vendor.sh with RECOMPILE_KERNEL=1 - do NOT call it separately.
+      # ONE invocation. build_kernel_GKI.sh calls prepare_vendor.sh with
+      # RECOMPILE_KERNEL=1, which calls build/build.sh with SKIP_MRPROPER=1.
       - name: Build kernel
-        id: build
         shell: bash
+        env:
+          LTO: ${{ github.event.inputs.lto || 'thin' }}
+          MAKEFLAGS: -j${{ github.event.inputs.jobs || '4' }}
         run: |
           set -o pipefail
+          echo "LTO=$LTO MAKEFLAGS=$MAKEFLAGS nproc=$(nproc)"
           ./build_kernel_GKI.sh 2>&1 | tee build.log
-          echo "exit=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
-      - name: Summarise build log
+      - name: Verify vendor DLKMs
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          KO=$(find out device -name '*.ko' 2>/dev/null | wc -l)
+          echo "total .ko: $KO"
+          for m in mmrm_module audio_dlkm camera msm_drm rmnet_core rmnet_wlan; do
+            find out device -name "${m}.ko" -print -quit 2>/dev/null | grep -q . \
+              && echo "  OK      ${m}.ko" || echo "  MISSING ${m}.ko"
+          done
+          if [ "$KO" = "0" ]; then
+            echo "::error::No modules built. build.sh only assigns KBUILD_EXT_MODULES to EXT_MODULES when the internal OUT_DIR basename is exactly 'msm-kernel' (KL_DIR guard)."
+          fi
+
+      - name: Summarise log
         if: always()
         shell: bash
         run: |
           [ -f build.log ] || exit 0
-          echo "### Build log tail" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Log tail" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "\$GITHUB_STEP_SUMMARY"
           tail -60 build.log >> "\$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-          echo
           echo "=== errors ==="
-          grep -nE "^(.*): (error|fatal error):|^make.*\*\*\*|modpost: .*undefined" \
-            build.log | head -50 || echo "none"
+          grep -nE "(error|fatal error):|^make.*\*\*\*|modpost: .*undefined|^!!|WARNING!! No" \
+            build.log | head -50 || echo none
 
       - name: Collect artifacts
         if: always()
         shell: bash
         run: |
           set +e
-          OUT_DIR="${GITHUB_WORKSPACE}/out/msm-${CHIPSET_NAME}-${CHIPSET_NAME}-gki"
+          OUT="${GITHUB_WORKSPACE}/out/msm-${CHIPSET_NAME}-${CHIPSET_NAME}-gki"
+          KOUT="${GITHUB_WORKSPACE}/device/qcom/gki-kernel"
           mkdir -p artifacts
 
-          echo "=== out/ tree (depth 3) ==="
-          find out -maxdepth 3 -type d 2>/dev/null | head -60
+          echo "=== out/ ==="   ; find out -maxdepth 3 -type d 2>/dev/null | head -40
+          echo "=== device/ ===" ; find device -maxdepth 4 2>/dev/null | head -40
 
-          for d in "$OUT_DIR/dist" "$OUT_DIR/gki_kernel/dist"; do
-            if [ -d "$d" ]; then
-              name=$(echo "$d" | sed "s|$OUT_DIR/||; s|/|_|g")
-              mkdir -p "artifacts/$name"
-              cp -a "$d/." "artifacts/$name/"
-              echo "collected: $d"
-            fi
+          # Curated prebuilts: Image, vmlinux, *.ko, vendor_dlkm/, kp-dtbs/, headers
+          if [ -d "$KOUT" ]; then
+            mkdir -p artifacts/kernel-prebuilts
+            rsync -a --exclude 'host/' --exclude 'kernel-uapi-headers/' \
+                  "$KOUT/" artifacts/kernel-prebuilts/
+          fi
+
+          # Raw dist from build.sh
+          for d in "$OUT/dist" "$OUT/gki_kernel/dist"; do
+            [ -d "$d" ] || continue
+            n=$(echo "${d#$OUT/}" | tr '/' '_')
+            mkdir -p "artifacts/$n" && cp -a "$d/." "artifacts/$n/"
           done
 
-          # kernel config + map, wherever they landed
-          find out -maxdepth 5 $$ -name ".config" -o -name "System.map" $$ \
-            -exec cp -n {} artifacts/ \; 2>/dev/null
+          for k in msm-kernel common; do
+            [ -f "$OUT/$k/.config" ] && cp "$OUT/$k/.config" "artifacts/config-$k"
+          done
 
-          # any stray modules not already in dist/
-          mkdir -p artifacts/modules
-          find out -name "*.ko" -newer build.log -exec cp -n {} artifacts/modules/ \; 2>/dev/null
-          rmdir artifacts/modules 2>/dev/null
+          # Salvage if the build died before dist/ was populated
+          if [ ! -d artifacts/dist ] && [ ! -d artifacts/kernel-prebuilts ]; then
+            mkdir -p artifacts/salvage
+            find "$OUT/staging" -name '*.ko' -exec cp -n {} artifacts/salvage/ \; 2>/dev/null
+            rmdir artifacts/salvage 2>/dev/null
+          fi
 
           cp build.log artifacts/ 2>/dev/null
-
-          echo
-          echo "=== artifacts ==="
-          du -sh artifacts/* 2>/dev/null
-          du -sh artifacts
+          du -sh artifacts/* 2>/dev/null; du -sh artifacts
 
       - name: Upload artifacts
         if: always()
@@ -259,7 +295,6 @@ jobs:
           path: artifacts
           if-no-files-found: warn
           retention-days: 14
-          compression-level: 6
 
       - name: Final disk report
         if: always()
