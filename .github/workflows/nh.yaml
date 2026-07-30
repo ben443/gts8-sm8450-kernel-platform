@@ -1,0 +1,82 @@
+name: Build NetHunter Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernelsu:
+        description: 'Integrate KernelSU'
+        required: true
+        default: 'true'
+        type: boolean
+      nethunter:
+        description: 'Apply NetHunter patches'
+        required: true
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout workspace
+        uses: actions/checkout@v4
+
+      - name: Free disk space (CI runner)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/Ruby \
+                      /opt/hostedtoolcache/PyPy /opt/hostedtoolcache/Python \
+                      /usr/local/share/boost /usr/local/share/powershell \
+                      /usr/lib/jvm /usr/local/lib/heroku /usr/local/julia* \
+                      /var/lib/gems /var/cache/apt/archives
+          sudo apt-get autoremove -y 2>/dev/null || true
+          sudo apt-get clean
+          df -h
+          free -h
+
+      - name: Setup swap (8 GB to survive kernel link)
+        run: |
+          sudo fallocate -l 8G /mnt/swap || sudo dd if=/dev/zero of=/mnt/swap bs=1M count=8192
+          sudo chmod 600 /mnt/swap
+          sudo mkswap /mnt/swap
+          sudo swapon /mnt/swap
+          free -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc curl git zip unzip \
+                                  bison flex libssl-dev libelf-dev \
+                                  python3 python3-pip gcc-aarch64-linux-gnu \
+                                  gcc-arm-linux-gnueabi
+
+      # Note: If your build_kernel_GKI.sh requires specific environment variables, 
+      # they should be exported here before running the script.
+      - name: Build kernel using GKI script
+        run: bash build_kernel_GKI.sh
+
+      - name: Show artifacts
+        if: always()
+        run: |
+          ls -la out/ 2>/dev/null || true
+          du -sh out/ 2>/dev/null || true
+
+      - name: Upload Kernel Artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-files
+          path: out/**/Image*
+          if-no-files-found: warn
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: out/**/*.log
+          if-no-files-found: warn
