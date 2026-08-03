@@ -74,7 +74,7 @@ export INTERNAL_STORAGE="128GB"
 export BATTERY_CAPACITY="8000"
 
 # Features
-export HAS_S Pen="true"
+export HAS_SPEN="true"
 export HAS_FINGERPRINT="false"
 export HAS_FACE_RECOGNITION="true"
 export HAS_NFC="false"
@@ -472,7 +472,7 @@ print_device_config() {
     echo "║ RAM:                 ${RAM_SIZE}"
     echo "║ Internal Storage:    ${INTERNAL_STORAGE}"
     echo "║ Screen Resolution:   ${SCREEN_RESOLUTION}"
-    echo "║ S Pen Support:       ${HAS_S Pen}"
+    echo "║ S Pen Support:       ${HAS_SPEN}"
     echo "║ NetHunter Features:  ${NETHUNTER_FEATURES}"
     echo "╚══════════════════════════════════════════════════════════════════════════════╝"
 }

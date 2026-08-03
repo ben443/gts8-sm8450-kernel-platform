@@ -102,12 +102,12 @@ The build process for GKI devices is different from legacy devices:
 
 ```bash
 # Full GKI build
-./build-nethunter.sh full
+./scripts/build-nethunter.sh full
 
 # Individual GKI steps
-./build-nethunter.sh configure  # Configures GKI + vendor
-./build-nethunter.sh build      # Builds GKI kernel + modules
-./build-nethunter.sh package    # Packages for installation
+./scripts/build-nethunter.sh configure  # Configures GKI + vendor
+./scripts/build-nethunter.sh build      # Builds GKI kernel + modules
+./scripts/build-nethunter.sh package    # Packages for installation
 ```
 
 ### GKI Build Output
@@ -209,7 +209,7 @@ modprobe 88XXau
 uname -r
 
 # Rebuild modules for current kernel
-./build-nethunter.sh build
+./scripts/build-nethunter.sh build
 ```
 
 #### Issue: WiFi adapter not detected

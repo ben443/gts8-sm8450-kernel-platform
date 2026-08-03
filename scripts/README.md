@@ -140,21 +140,21 @@ sudo apt-get install -y \
 #### 1. Clone this repository
 
 ```bash
-git clone https://github.com/yourusername/nethunter-gts8wifi.git
-cd nethunter-gts8wifi
+git clone https://github.com/ben443/gts8-sm8450-kernel-platform.git
+cd gts8-sm8450-kernel-platform
 ```
 
 #### 2. Run the build script
 
 ```bash
 # Make the script executable
-chmod +x build-nethunter.sh
+chmod +x scripts/build-nethunter.sh
 
 # Run full build (recommended for first time)
-./build-nethunter.sh full
+./scripts/build-nethunter.sh full
 
 # Or use the interactive menu
-./build-nethunter.sh
+./scripts/build-nethunter.sh
 ```
 
 #### 3. Build Options
@@ -163,16 +163,16 @@ The script provides several build options:
 
 ```bash
 # Full build (setup + download + configure + build + package)
-./build-nethunter.sh full
+./scripts/build-nethunter.sh full
 
 # Individual steps
-./build-nethunter.sh setup        # Setup environment only
-./build-nethunter.sh toolchains   # Download toolchains only
-./build-nethunter.sh source       # Download kernel source only
-./build-nethunter.sh configure    # Configure kernel only
-./build-nethunter.sh build        # Build kernel only
-./build-nethunter.sh package      # Package kernel only
-./build-nethunter.sh clean        # Clean build directory
+./scripts/build-nethunter.sh setup        # Setup environment only
+./scripts/build-nethunter.sh toolchains   # Download toolchains only
+./scripts/build-nethunter.sh source       # Download kernel source only
+./scripts/build-nethunter.sh configure    # Configure kernel only
+./scripts/build-nethunter.sh build        # Build kernel only
+./scripts/build-nethunter.sh package      # Package kernel only
+./scripts/build-nethunter.sh clean        # Clean build directory
 ```
 
 ### Docker Build
@@ -199,7 +199,7 @@ docker run \
     -v $(pwd)/output:/build/output \
     -v nethunter-ccache:/build/.ccache \
     nethunter-gts8wifi-builder \
-    ./build-nethunter.sh full
+    ./scripts/build-nethunter.sh full
 ```
 
 #### 3. Using Docker Compose
@@ -209,7 +209,7 @@ docker run \
 docker-compose up --build
 
 # Run with specific command
-docker-compose run builder ./build-nethunter.sh full
+docker-compose run builder ./scripts/build-nethunter.sh full
 ```
 
 ## 📥 Installation
@@ -316,8 +316,8 @@ sudo apt-get install -y build-essential git bc bison flex
 **Solution**: Clean and rebuild
 ```bash
 make clean && make mrproper
-./build-nethunter.sh configure
-./build-nethunter.sh build
+./scripts/build-nethunter.sh configure
+./scripts/build-nethunter.sh build
 ```
 
 #### Issue: Out of memory during build
@@ -325,7 +325,7 @@ make clean && make mrproper
 **Solution**: Reduce parallel jobs
 ```bash
 export JOBS=2
-./build-nethunter.sh build
+./scripts/build-nethunter.sh build
 ```
 
 ### Device Issues
