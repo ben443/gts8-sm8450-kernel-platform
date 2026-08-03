@@ -57,12 +57,11 @@ export GKI_MODULE_SIG_HASH="sha256"
 - Added GKI Version: android13-5.10
 - Added GKI Enabled: Yes
 
-### 4. Updated `QUICKSTART.md`
+### 4. Updated script invocation examples
 
-**Added GKI Notes section:**
-- GKI version information
-- Build process overview
-- Module loading notes
+**Path consistency updates:**
+- Updated command examples to use `./scripts/build-nethunter.sh`
+- Aligned examples with repository layout
 
 ### 5. Created `GKI-GUIDE.md`
 
@@ -73,19 +72,11 @@ export GKI_MODULE_SIG_HASH="sha256"
 - Installation Differences (legacy vs GKI)
 - Troubleshooting GKI (common issues and solutions)
 
-### 6. Updated `FILES.md`
+### 6. Updated documentation consistency
 
-**Updated directory structure:**
-- Added GKI-specific output directories
-- Added GKI build logs
-- Updated build-nethunter.sh documentation with GKI functions
-
-### 7. Updated `PROJECT_SUMMARY.txt`
-
-**Added GKI section:**
-- GKI version information
-- Build process explanation
-- GKI notes for users
+**Updated documentation references:**
+- Kept references limited to files that exist in this repository
+- Removed assumptions about non-existent companion docs
 
 ## 📊 GKI Build Output Structure
 
@@ -196,10 +187,8 @@ output/
 ## 📚 Documentation
 
 - **README.md** - Main documentation with GKI section
-- **QUICKSTART.md** - Quick start with GKI notes
 - **GKI-GUIDE.md** - Comprehensive GKI guide
-- **FILES.md** - File structure with GKI output
-- **PROJECT_SUMMARY.txt** - Summary with GKI info
+- **GKI-UPDATE-SUMMARY.md** - Summary of GKI-related script/documentation updates
 
 ## ✅ Verification
 
