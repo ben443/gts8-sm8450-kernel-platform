@@ -85,6 +85,39 @@ jobs:
           git lfs install || true
           python --version
 
+      - name: Check for prebuilt toolchain
+        id: toolchain
+        shell: bash
+        run: |
+          set +e
+          C=$(ls -d kernel_platform/prebuilts/clang/host/linux-x86/clang-* 2>/dev/null | tail -1)
+          if [ -n "$C" ] && [ -x "$C/bin/clang" ]; then
+            echo "found: $C"; "$C/bin/clang" --version | head -2
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no vendored clang"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch AOSP prebuilts (fallback)
+        if: steps.toolchain.outputs.present == 'false'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          B=android14-release
+          KP=kernel_platform
+          clone() {
+            [ -e "$2" ] && { echo "exists: $2"; return; }
+            mkdir -p "$(dirname "$2")"
+            git clone --depth 1 -b "$B" "$1" "$2"
+            rm -rf "$2/.git"
+          }
+          clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 "$KP/prebuilts/clang/host/linux-x86"
+          clone https://android.googlesource.com/platform/prebuilts/build-tools           "$KP/prebuilts/build-tools"
+          clone https://android.googlesource.com/kernel/prebuilts/build-tools             "$KP/prebuilts/kernel-build-tools"
+          clone https://android.googlesource.com/platform/system/tools/mkbootimg          "$KP/tools/mkbootimg"
+          df -h /
+
       - name: Make scripts executable
         run: |
           chmod +x build_kernel_GKI.sh
