@@ -13,7 +13,7 @@
 #include <net/netfilter/nf_conntrack.h>
 #include <net/netfilter/nf_conntrack_ecache.h>
 #include <linux/netfilter/x_tables.h>
-#include <linux/netfilter/xt_connmark.h>
+#include <linux/netfilter/XT_CONNMARK.h>
 
 // SEC_PRODUCT_FEATURE_KNOX_SUPPORT_VPN {
 #ifdef CONFIG_KNOX_NCM
