@@ -14,8 +14,13 @@ export ANDROID_BUILD_TOP=$(pwd)
 export TARGET_PRODUCT=gki
 export TARGET_BOARD_PLATFORM=gki
 # Toggle NetHunter compatibility fragment integration in build.config.sec.
-# Set NETHUNTER_ENABLE=1 to enable.
-export NETHUNTER_ENABLE=1
+# Set NETHUNTER_ENABLE=0 to disable.
+export NETHUNTER_ENABLE="${NETHUNTER_ENABLE:-1}"
+NETHUNTER_FRAGMENT="${ANDROID_BUILD_TOP}/kernel_platform/msm-kernel/arch/arm64/configs/vendor/${CHIPSET_NAME}_nethunter_gki.fragment"
+if [ "${NETHUNTER_ENABLE}" = "1" ] && [ ! -f "${NETHUNTER_FRAGMENT}" ]; then
+  echo "WARN: ${NETHUNTER_FRAGMENT} not found; disabling NetHunter fragment"
+  export NETHUNTER_ENABLE=0
+fi
 
 export ANDROID_PRODUCT_OUT=${ANDROID_BUILD_TOP}/out/target/product/${MODEL}
 export OUT_DIR=${ANDROID_BUILD_TOP}/out/msm-${CHIPSET_NAME}-${CHIPSET_NAME}-${TARGET_PRODUCT}

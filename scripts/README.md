@@ -159,20 +159,22 @@ chmod +x scripts/build-nethunter.sh
 
 #### 3. Build Options
 
-The script provides several build options:
+The script is a repo-native wrapper around `build_kernel_GKI.sh` and supports:
 
 ```bash
-# Full build (setup + download + configure + build + package)
+# Full Samsung sec gki build with NetHunter fragment enabled
 ./scripts/build-nethunter.sh full
 
-# Individual steps
-./scripts/build-nethunter.sh setup        # Setup environment only
-./scripts/build-nethunter.sh toolchains   # Download toolchains only
-./scripts/build-nethunter.sh source       # Download kernel source only
-./scripts/build-nethunter.sh configure    # Configure kernel only
-./scripts/build-nethunter.sh build        # Build kernel only
-./scripts/build-nethunter.sh package      # Package kernel only
-./scripts/build-nethunter.sh clean        # Clean build directory
+# Aliases of full for compatibility
+./scripts/build-nethunter.sh build
+./scripts/build-nethunter.sh configure
+./scripts/build-nethunter.sh package
+
+# Verify expected NetHunter config symbols after build
+./scripts/build-nethunter.sh verify
+
+# Clean local kernel outputs
+./scripts/build-nethunter.sh clean
 ```
 
 ### Docker Build
