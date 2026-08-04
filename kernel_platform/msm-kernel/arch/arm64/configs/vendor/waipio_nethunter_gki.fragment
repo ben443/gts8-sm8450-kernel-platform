@@ -1,0 +1,35 @@
+# NetHunter compatibility fragment for SM8450 waipio GKI (5.10)
+#
+# Keep this focused on options that are not already enabled by the stock
+# waipio Samsung sec gki defconfig chain.
+
+# USB gadget and host features used by NetHunter tooling
+CONFIG_USB_CONFIGFS_OBEX=y
+CONFIG_USB_CONFIGFS_ECM_SUBSET=y
+CONFIG_USB_CONFIGFS_F_UAC1=y
+CONFIG_USB_CONFIGFS_F_UAC1_LEGACY=y
+CONFIG_USB_MON=y
+
+# USB serial and modem adapters
+CONFIG_USB_SERIAL=y
+CONFIG_USB_SERIAL_GENERIC=y
+CONFIG_USB_SERIAL_CP210X=y
+CONFIG_USB_SERIAL_CH341=y
+CONFIG_USB_SERIAL_FTDI_SIO=y
+CONFIG_USB_SERIAL_PL2303=y
+CONFIG_USB_SERIAL_WWAN=y
+CONFIG_USB_SERIAL_OPTION=y
+
+# Extra USB networking modes
+CONFIG_USB_NET_RNDIS_HOST=y
+CONFIG_USB_NET_QMI_WWAN=y
+
+# Bluetooth PAN profile
+CONFIG_BT_BNEP=y
+
+# External Wi-Fi adapter support (monitor/injection capable chipsets)
+CONFIG_WLAN_VENDOR_ATH=y
+CONFIG_WLAN_VENDOR_MEDIATEK=y
+CONFIG_ATH9K_HTC=m
+CONFIG_MT7601U=m
+CONFIG_R8188EU=m

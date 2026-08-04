@@ -1,82 +1,147 @@
-name: Build NetHunter Kernel
+name: Build NetHunter-Compatible Kernel (waipio sec gki)
 
 on:
   workflow_dispatch:
     inputs:
-      kernelsu:
-        description: 'Integrate KernelSU'
-        required: true
-        default: 'true'
+      build_target:
+        description: "Samsung build target"
+        required: false
+        default: "gts8wifi_eur_open"
+      jobs:
+        description: "make -j level"
+        required: false
+        default: "4"
+      lto:
+        description: "LTO mode"
+        type: choice
+        options: [thin, full, none]
+        default: thin
+      clean_build:
+        description: "Wipe out/ and device/qcom/*-kernel first"
         type: boolean
-      nethunter:
-        description: 'Apply NetHunter patches'
-        required: true
-        default: 'true'
-        type: boolean
+        default: false
+  push:
+    branches: [ "main" ]
+    paths:
+      - "build_kernel_GKI.sh"
+      - "kernel_platform/msm-kernel/build.config.sec"
+      - "kernel_platform/msm-kernel/arch/arm64/configs/vendor/waipio_nethunter_gki.fragment"
+      - ".github/workflows/nh.yaml"
 
 permissions:
   contents: read
 
+concurrency:
+  group: nethunter-kernel-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 240
+    timeout-minutes: 360
+    env:
+      BUILD_TARGET: ${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}
+      LC_ALL: C
+      LANG: C
+      NETHUNTER_ENABLE: "1"
+
     steps:
-      - name: Checkout workspace
-        uses: actions/checkout@v4
-
-      - name: Free disk space (CI runner)
+      - name: Reclaim disk space
         run: |
+          df -h /
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /opt/hostedtoolcache/CodeQL /opt/hostedtoolcache/Ruby \
-                      /opt/hostedtoolcache/PyPy /opt/hostedtoolcache/Python \
-                      /usr/local/share/boost /usr/local/share/powershell \
-                      /usr/lib/jvm /usr/local/lib/heroku /usr/local/julia* \
-                      /var/lib/gems /var/cache/apt/archives
-          sudo apt-get autoremove -y 2>/dev/null || true
+                      /usr/local/share/boost /usr/local/lib/node_modules \
+                      /opt/hostedtoolcache/CodeQL /usr/share/swift \
+                      /usr/local/.ghcup || true
+          sudo docker image prune -a -f || true
           sudo apt-get clean
-          df -h
+          df -h /
+
+      - name: Add swap (8G on /mnt)
+        run: |
+          sudo fallocate -l 8G /mnt/swapfile
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          sudo sysctl -w vm.swappiness=80
           free -h
 
-      - name: Setup swap (8 GB to survive kernel link)
-        run: |
-          sudo fallocate -l 8G /mnt/swap || sudo dd if=/dev/zero of=/mnt/swap bs=1M count=8192
-          sudo chmod 600 /mnt/swap
-          sudo mkswap /mnt/swap
-          sudo swapon /mnt/swap
-          free -h
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          lfs: true
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential bc curl git zip unzip \
-                                  bison flex libssl-dev libelf-dev \
-                                  python3 python3-pip gcc-aarch64-linux-gnu \
-                                  gcc-arm-linux-gnueabi
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            bc bison build-essential curl flex git git-lfs gnupg gperf \
+            libelf-dev liblz4-tool libncurses5 libncurses5-dev libssl-dev \
+            libxml2 libxml2-utils lzop rsync zip unzip zlib1g-dev \
+            python3 python3-pip python-is-python3 jq ca-certificates \
+            dwarves cpio kmod device-tree-compiler
+          git lfs install || true
+          python --version
 
-      # Note: If your build_kernel_GKI.sh requires specific environment variables, 
-      # they should be exported here before running the script.
-      - name: Build kernel using GKI script
-        run: bash build_kernel_GKI.sh
-
-      - name: Show artifacts
-        if: always()
+      - name: Make scripts executable
         run: |
-          ls -la out/ 2>/dev/null || true
-          du -sh out/ 2>/dev/null || true
+          chmod +x build_kernel_GKI.sh
+          chmod +x kernel_platform/build/brunch || true
+          find kernel_platform/build -name "*.sh" -exec chmod +x {} \; || true
+          find kernel_platform/build -name "*.py" -exec chmod +x {} \; || true
 
-      - name: Upload Kernel Artifacts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-build-files
-          path: out/**/Image*
-          if-no-files-found: warn
+      - name: Clean (optional)
+        if: github.event.inputs.clean_build == 'true'
+        run: rm -rf out/ device/qcom/*-kernel
 
-      - name: Upload build log
+      - name: Build NetHunter-compatible sec gki kernel
+        shell: bash
+        env:
+          LTO: ${{ github.event.inputs.lto || 'thin' }}
+          MAKEFLAGS: -j${{ github.event.inputs.jobs || '4' }}
+        run: |
+          set -o pipefail
+          echo "BUILD_TARGET=$BUILD_TARGET NETHUNTER_ENABLE=$NETHUNTER_ENABLE LTO=$LTO MAKEFLAGS=$MAKEFLAGS nproc=$(nproc)"
+          ./build_kernel_GKI.sh 2>&1 | tee build-nethunter.log
+
+      - name: Verify NetHunter fragment was applied
+        if: always()
+        shell: bash
+        run: |
+          CFG="device/qcom/gki-kernel/.config"
+          if [ ! -f "$CFG" ]; then
+            CFG=$(find out -path "*/dist/.config" | head -n 1)
+          fi
+          if [ -z "$CFG" ] || [ ! -f "$CFG" ]; then
+            echo "::warning::Unable to locate final .config for verification"
+            exit 0
+          fi
+
+          echo "Using config: $CFG"
+          grep -E "^CONFIG_(USB_SERIAL|USB_MON|USB_NET_RNDIS_HOST|USB_NET_QMI_WWAN|BT_BNEP|ATH9K_HTC|MT7601U|R8188EU)=" "$CFG" || true
+
+      - name: Collect artifacts
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          cp -f build-nethunter.log artifacts/ 2>/dev/null || true
+          cp -f device/qcom/gki-kernel/.config artifacts/kernel.config 2>/dev/null || true
+          cp -f device/qcom/gki-kernel/Image artifacts/ 2>/dev/null || true
+          cp -f device/qcom/gki-kernel/vmlinux artifacts/ 2>/dev/null || true
+          find device/qcom/gki-kernel -name "*.ko" -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -path "*/dist/*.img" -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -path "*/dist/*.ko" -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -path "*/dist/modules*.load" -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -path "*/dist/modules*.blocklist" -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -lah artifacts || true
+
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: out/**/*.log
+          name: nethunter-kernel-${{ github.run_number }}
+          path: artifacts/**
           if-no-files-found: warn

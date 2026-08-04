@@ -11,3 +11,9 @@ fi
 
 # VARIANT_DEFCONFIG
 # apply_defconfig_fragment ${KERNEL_DIR}/arch/${ARCH}/configs/vendor/${MSM_ARCH}_sec_${TARGET_VARIANT}_defconfig vendor/${MSM_ARCH}-gki_defconfig
+
+# Optional NetHunter compatibility fragment for sec gki builds.
+# Enable with NETHUNTER_ENABLE=1.
+if [[ "${NETHUNTER_ENABLE}" == "1" ]]; then
+	apply_defconfig_fragment ${KERNEL_DIR}/arch/${ARCH}/configs/vendor/${MSM_ARCH}_nethunter_gki.fragment vendor/${MSM_ARCH}-gki_defconfig
+fi
