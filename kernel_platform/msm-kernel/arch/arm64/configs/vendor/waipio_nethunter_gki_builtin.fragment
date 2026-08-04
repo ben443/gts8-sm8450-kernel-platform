@@ -1,0 +1,28 @@
+# NetHunter GKI built-in options for SM8450 waipio (5.10)
+#
+# These options must be compiled into the GKI Image rather than as vendor
+# modules.  This fragment is merged into gki_defconfig via
+# GKI_DEFCONFIG_FRAGMENT -> waipio_nethunter_gki_builtin.config.
+#
+# Only =y symbols belong here.  Module-capable drivers go in
+# waipio_nethunter_gki.fragment and are built as vendor modules.
+
+# USB gadget configfs functions required by NetHunter
+CONFIG_USB_CONFIGFS_OBEX=y
+CONFIG_USB_CONFIGFS_ECM_SUBSET=y
+CONFIG_USB_CONFIGFS_F_UAC1=y
+CONFIG_USB_CONFIGFS_F_UAC1_LEGACY=y
+
+# USB monitor (required for traffic capture tools)
+CONFIG_USB_MON=y
+
+# Bluetooth PAN profile (built-in; modules depend on it)
+CONFIG_BT_BNEP=y
+CONFIG_BT_BNEP_MC_FILTER=y
+CONFIG_BT_BNEP_PROTO_FILTER=y
+
+# Vendor selection stubs for external Wi-Fi adapters (=y guards)
+CONFIG_WLAN_VENDOR_ATH=y
+CONFIG_WLAN_VENDOR_MEDIATEK=y
+CONFIG_WLAN_VENDOR_RALINK=y
+CONFIG_WLAN_VENDOR_REALTEK=y

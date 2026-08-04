@@ -26,6 +26,8 @@ on:
       - "build_kernel_GKI.sh"
       - "kernel_platform/msm-kernel/build.config.sec"
       - "kernel_platform/msm-kernel/arch/arm64/configs/vendor/waipio_nethunter_gki.fragment"
+      - "kernel_platform/msm-kernel/arch/arm64/configs/vendor/waipio_nethunter_gki_builtin.fragment"
+      - "kernel_platform/msm-kernel/arch/arm64/configs/vendor/waipio_nethunter_gki_builtin.config"
       - ".github/workflows/nh.yaml"
 
 permissions:
@@ -148,12 +150,65 @@ jobs:
             CFG=$(find out -path "*/dist/.config" | head -n 1)
           fi
           if [ -z "$CFG" ] || [ ! -f "$CFG" ]; then
-            echo "::warning::Unable to locate final .config for verification"
-            exit 0
+            echo "::error::Unable to locate final .config for verification"
+            exit 1
           fi
 
           echo "Using config: $CFG"
-          grep -E "^CONFIG_(USB_SERIAL|USB_MON|USB_NET_RNDIS_HOST|USB_NET_QMI_WWAN|BT_BNEP|ATH9K_HTC|MT7601U|R8188EU)=" "$CFG" || true
+
+          # Verify every required NetHunter symbol has the expected value.
+          # Each entry is "CONFIG_SYMBOL=expected_value".
+          required_symbols=(
+            "CONFIG_USB_CONFIGFS_OBEX=y"
+            "CONFIG_USB_CONFIGFS_ECM_SUBSET=y"
+            "CONFIG_USB_CONFIGFS_F_UAC1=y"
+            "CONFIG_USB_CONFIGFS_F_UAC1_LEGACY=y"
+            "CONFIG_USB_MON=y"
+            "CONFIG_USB_SERIAL=m"
+            "CONFIG_USB_SERIAL_GENERIC=y"
+            "CONFIG_USB_SERIAL_CP210X=m"
+            "CONFIG_USB_SERIAL_CH341=m"
+            "CONFIG_USB_SERIAL_FTDI_SIO=m"
+            "CONFIG_USB_SERIAL_PL2303=m"
+            "CONFIG_USB_SERIAL_WWAN=m"
+            "CONFIG_USB_SERIAL_OPTION=m"
+            "CONFIG_USB_NET_RNDIS_HOST=m"
+            "CONFIG_USB_NET_QMI_WWAN=m"
+            "CONFIG_BT_HCIBTUSB=m"
+            "CONFIG_BT_BNEP=y"
+            "CONFIG_BT_BNEP_MC_FILTER=y"
+            "CONFIG_BT_BNEP_PROTO_FILTER=y"
+            "CONFIG_WLAN_VENDOR_ATH=y"
+            "CONFIG_WLAN_VENDOR_MEDIATEK=y"
+            "CONFIG_WLAN_VENDOR_RALINK=y"
+            "CONFIG_WLAN_VENDOR_REALTEK=y"
+            "CONFIG_ATH9K_HTC=m"
+            "CONFIG_MT7601U=m"
+            "CONFIG_R8188EU=m"
+          )
+
+          failed=0
+          for entry in "${required_symbols[@]}"; do
+            sym="${entry%%=*}"
+            val="${entry#*=}"
+            actual=$(grep -E "^${sym}=" "$CFG" | cut -d= -f2-)
+            if [ "$actual" = "$val" ]; then
+              echo "  OK: ${sym}=${val}"
+            else
+              if [ -z "$actual" ]; then
+                echo "::error::MISSING: ${sym} (expected ${sym}=${val})"
+              else
+                echo "::error::MISMATCH: ${sym}=${actual} (expected ${val})"
+              fi
+              failed=$((failed + 1))
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::NetHunter fragment verification failed: ${failed} symbol(s) not set correctly"
+            exit 1
+          fi
+          echo "All required NetHunter symbols verified successfully."
 
       - name: Collect artifacts
         if: always()
