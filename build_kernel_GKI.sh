@@ -15,7 +15,7 @@ export TARGET_PRODUCT=gki
 export TARGET_BOARD_PLATFORM=gki
 # Toggle NetHunter compatibility fragment integration in build.config.sec.
 # Set NETHUNTER_ENABLE=1 to enable.
-export NETHUNTER_ENABLE=${NETHUNTER_ENABLE:-0}
+export NETHUNTER_ENABLE=1
 
 export ANDROID_PRODUCT_OUT=${ANDROID_BUILD_TOP}/out/target/product/${MODEL}
 export OUT_DIR=${ANDROID_BUILD_TOP}/out/msm-${CHIPSET_NAME}-${CHIPSET_NAME}-${TARGET_PRODUCT}
