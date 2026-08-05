@@ -104,9 +104,10 @@ The build process for GKI devices is different from legacy devices:
 # Full GKI build
 ./scripts/build-nethunter.sh full
 
-# Individual GKI steps
-./scripts/build-nethunter.sh configure  # Configures GKI + vendor
-./scripts/build-nethunter.sh build      # Builds GKI kernel + modules
+# Individual GKI steps (must be run in order; skipping configure causes build to
+# omit vendor modules because GKI_BUILD_VENDOR_MODULES is only set by configure)
+./scripts/build-nethunter.sh configure  # Configures GKI + vendor (sets GKI_BUILD_VENDOR_MODULES)
+./scripts/build-nethunter.sh build      # Builds GKI kernel + modules (requires prior configure)
 ./scripts/build-nethunter.sh package    # Packages for installation
 ```
 
