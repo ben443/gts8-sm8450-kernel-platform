@@ -13,7 +13,6 @@ jobs:
     timeout-minutes: 180
 
     steps:
-      # 1. Checkout your repository first (required for local scripts)
       - name: Checkout Source Code
         uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.0
         with:
@@ -21,7 +20,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # 2. Free up disk space on the runner
       - name: Maximize Build Space
         uses: easimon/maximize-build-space@4c1955f5a8f2771a8f4da9d31f6882f8f33f70a4
         with:
@@ -31,7 +29,6 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      # 3. Install necessary host dependencies
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
@@ -41,7 +38,6 @@ jobs:
             zip unzip cpio rsync git \
             dwarves elfutils pahole
 
-      # 4. Build kernel
       - name: Execute Build Script
         shell: bash
         run: |
@@ -49,7 +45,6 @@ jobs:
           chmod +x build_kernel_GKI.sh
           ./build_kernel_GKI.sh
 
-      # 5. Collect build outputs deterministically
       - name: Collect artifacts
         if: success()
         shell: bash
@@ -57,7 +52,6 @@ jobs:
           set -euo pipefail
           mkdir -p artifacts/kernel artifacts/modules
 
-          # Collect kernel Image files
           mapfile -t IMAGES < <(find out -type f -name 'Image' 2>/dev/null || true)
           if [ ${#IMAGES[@]} -eq 0 ]; then
             echo "No kernel Image found under out/**/Image"
@@ -69,7 +63,6 @@ jobs:
             cp -av "$img" "artifacts/kernel/$rel"
           done
 
-          # Collect modules (.ko). Fail if none were produced.
           mapfile -t MODULES < <(find out -type f -name '*.ko' 2>/dev/null || true)
           if [ ${#MODULES[@]} -eq 0 ]; then
             echo "No .ko modules found under out/**/*.ko"
@@ -81,16 +74,14 @@ jobs:
             cp -av "$ko" "artifacts/modules/$rel"
           done
 
-          # Helpful manifest for debugging downloads
           {
-            echo "Kernel Images:";
-            printf '%s\n' "${IMAGES[@]}";
-            echo;
-            echo "Kernel Modules:";
-            printf '%s\n' "${MODULES[@]}";
+            echo "Kernel Images:"
+            printf '%s\n' "${IMAGES[@]}"
+            echo
+            echo "Kernel Modules:"
+            printf '%s\n' "${MODULES[@]}"
           } > artifacts/manifest.txt
 
-      # 6. Upload artifacts
       - name: Upload Kernel Artifacts
         if: success()
         uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
