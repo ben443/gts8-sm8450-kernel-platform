@@ -1,15 +1,29 @@
 name: Build SM8450 Custom Kernel
 
 on:
-  workflow_dispatch: # Allows you to trigger it manually
+  workflow_dispatch:
+
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-kernel:
     runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
     steps:
-      # 1. Free up disk space on the runner
+      # 1. Checkout your repository first (required for local scripts)
+      - name: Checkout Source Code
+        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.0
+        with:
+          lfs: true
+          submodules: recursive
+          fetch-depth: 0
+
+      # 2. Free up disk space on the runner
       - name: Maximize Build Space
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@4c1955f5a8f2771a8f4da9d31f6882f8f33f70a4
         with:
           root-reserve-mb: 8192
           remove-dotnet: 'true'
@@ -17,37 +31,71 @@ jobs:
           remove-haskell: 'true'
           remove-codeql: 'true'
 
-      # 2. Checkout your repository
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-        with:
-          lfs: true # Crucial for downloading prebuilt toolchain binaries
-          submodules: true
-
       # 3. Install necessary host dependencies
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex libssl-dev libncurses-dev zip unzip cpio rsync git
+          sudo apt-get install -y \
+            bc bison build-essential flex \
+            libssl-dev libncurses-dev \
+            zip unzip cpio rsync git \
+            dwarves elfutils pahole
 
-      # 4. Inject the custom config overrides and build
+      # 4. Build kernel
       - name: Execute Build Script
+        shell: bash
         run: |
-          # Give the script permission to run
+          set -euo pipefail
           chmod +x build_kernel_GKI.sh
-          
-          # (Optional) You can insert your scripts/config override commands here if you didn't hardcode them
-          
-          # Run the main build script
           ./build_kernel_GKI.sh
 
-      # 5. Extract the compiled Image and modules
-      - name: Upload Kernel Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Tab-S8-Kernel-and-Modules
-          path: |
-            out/**/Image
-            out/**/*.ko
-          # This prevents it from uploading thousands of unnecessary build files
+      # 5. Collect build outputs deterministically
+      - name: Collect artifacts
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/kernel artifacts/modules
 
+          # Collect kernel Image files
+          mapfile -t IMAGES < <(find out -type f -name 'Image' 2>/dev/null || true)
+          if [ ${#IMAGES[@]} -eq 0 ]; then
+            echo "No kernel Image found under out/**/Image"
+            exit 1
+          fi
+          for img in "${IMAGES[@]}"; do
+            rel="${img#out/}"
+            mkdir -p "artifacts/kernel/$(dirname "$rel")"
+            cp -av "$img" "artifacts/kernel/$rel"
+          done
+
+          # Collect modules (.ko). Fail if none were produced.
+          mapfile -t MODULES < <(find out -type f -name '*.ko' 2>/dev/null || true)
+          if [ ${#MODULES[@]} -eq 0 ]; then
+            echo "No .ko modules found under out/**/*.ko"
+            exit 1
+          fi
+          for ko in "${MODULES[@]}"; do
+            rel="${ko#out/}"
+            mkdir -p "artifacts/modules/$(dirname "$rel")"
+            cp -av "$ko" "artifacts/modules/$rel"
+          done
+
+          # Helpful manifest for debugging downloads
+          {
+            echo "Kernel Images:";
+            printf '%s\n' "${IMAGES[@]}";
+            echo;
+            echo "Kernel Modules:";
+            printf '%s\n' "${MODULES[@]}";
+          } > artifacts/manifest.txt
+
+      # 6. Upload artifacts
+      - name: Upload Kernel Artifacts
+        if: success()
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: Tab-S8-Kernel-and-Modules-${{ github.run_number }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
