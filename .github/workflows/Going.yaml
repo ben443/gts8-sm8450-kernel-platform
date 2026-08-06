@@ -1,0 +1,53 @@
+name: Build SM8450 Custom Kernel
+
+on:
+  workflow_dispatch: # Allows you to trigger it manually
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      # 1. Free up disk space on the runner
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      # 2. Checkout your repository
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          lfs: true # Crucial for downloading prebuilt toolchain binaries
+          submodules: true
+
+      # 3. Install necessary host dependencies
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential flex libssl-dev libncurses-dev zip unzip cpio rsync git
+
+      # 4. Inject the custom config overrides and build
+      - name: Execute Build Script
+        run: |
+          # Give the script permission to run
+          chmod +x build_kernel_GKI.sh
+          
+          # (Optional) You can insert your scripts/config override commands here if you didn't hardcode them
+          
+          # Run the main build script
+          ./build_kernel_GKI.sh
+
+      # 5. Extract the compiled Image and modules
+      - name: Upload Kernel Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tab-S8-Kernel-and-Modules
+          path: |
+            out/**/Image
+            out/**/*.ko
+          # This prevents it from uploading thousands of unnecessary build files
+
