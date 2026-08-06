@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
 
       - name: Maximize Build Space
-        uses: easimon/maximize-build-space@4c1955f5a8f2771a8f4da9d31f6882f8f33f70a4
+        uses: easimon/maximize-build-space@v10
         with:
           root-reserve-mb: 8192
           remove-dotnet: 'true'
