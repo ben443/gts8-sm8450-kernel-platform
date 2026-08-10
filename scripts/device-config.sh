@@ -41,6 +41,10 @@ export VENDOR_MODULE_DIR="vendor"
 export KERNEL_MODULE_DIR="kernel"
 
 # Kernel Source
+# KERNEL_SOURCE_URL must point to a standalone kernel tree (not a platform/container
+# repository).  Cloning a platform repo here would nest the actual kernel Makefile
+# under a subdirectory (e.g. kernel_platform/common/Makefile), causing subsequent
+# `cd "${KERNEL_DIR}" && make` calls to fail because no Makefile exists at root.
 export KERNEL_SOURCE_URL="https://github.com/akm-04/Samsung_Kernel_sm8450_common_gts8x"
 export KERNEL_BRANCH="main"
 export KERNEL_ALT_SOURCE="https://github.com/mohammad92/android_kernel_samsung_sm8450"
