@@ -1,10 +1,6 @@
-name: Build GKI kernel for gts8wifi (Android 14 / U9)
+name: Build GKI kernel for gts8wifi (Android 14 / U9)
 on:
-  push:
-    branches: [main]               # adjust if your default branch is named differently
-  pull_request:
-    branches: [main]
-  workflow_dispatch:               # ← this creates the “Run workflow” button
+  workflow_dispatch:               # ← manual trigger only
 
 # --------------------------------------------------------------
 # 2️⃣  Single job – runs on a native Arm64 runner (fast, no QEMU)
@@ -188,7 +184,7 @@ EOF
           # ---- 4b. Hook the fragment into the common GKI config ---------------------------
           cat >> kernel_platform/build.config <<'EOF'
 
-# NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
+# NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
 KERNEL_DEFCONFIG_FRAGMENTS+= \
         ../../../../nethunter-fragments/nethunter_defconfig \
 EOF
@@ -235,3 +231,4 @@ EOF
             kernel_platform/out/dist/vendor_dlkm.img
             kernel_platform/out/dist/Image.lz4
             kernel_platform/out/dist/dtb.img
+            
