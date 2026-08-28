@@ -147,3 +147,17 @@ nfc_i2c.ko
 hdm.ko
 pwm-gpclk.ko
 msm_rng.ko
+rtl8812au.ko
+rtl8822bu.ko
+rtl8822cu.ko
+rtl8821cu.ko
+rtl8188eu.ko
+rtl8192eu.ko
+rtl8814au.ko
+hid_raw.ko
+xt_TPROXY.ko
+nft_nat.ko
+nft_masq.ko
+nft_redir.ko
+overlay.ko
+loop.ko
