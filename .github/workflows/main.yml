@@ -5,30 +5,44 @@ on:
     branches: [main, android14-5.10]          # adjust to your branch names
   pull_request:
     branches: [main, android14-5.10]
-  workflow_dispatch:                         # manual trigger
+  # --------------------------------------------------------------
+  #  ✅  Manual trigger – appears as “Run workflow” in the Actions UI
+  # --------------------------------------------------------------
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Which builder to run'
+        required: true
+        default: 'native-arm64'
+        type: choice
+        options:
+          - native-arm64      # runs on ubuntu-24.04-arm (real Arm64 host)
+          - cross-x86         # runs on ubuntu-latest (x86‑64 cross‑compile)
+      upload_artifacts:
+        description: 'Upload boot / vendor_boot / vendor_dlkm images as artifacts'
+        required: true
+        default: 'true'
+        type: boolean
 
 # ------------------------------------------------------------------
-# Choose ONE of the two job definitions below.
-#   • native‑arm64  – runs on a real Arm64 host (fast, no emulation)
-#   • cross‑x86    – runs on the free ubuntu‑latest runner, cross‑compiles
+# The two jobs are **conditionally executed** based on the input above.
 # ------------------------------------------------------------------
-
 jobs:
   # --------------------------------------------------------------
-  # 1️⃣  Native Arm64 build (recommended)
+  # 1️⃣  Native Arm64 build (runs only when build_type == native-arm64)
   # --------------------------------------------------------------
   native-arm64:
     name: Native Arm64 GKI build
-    runs-on: ubuntu-24.04-arm                 # Arm64 hosted runner ^1^
+    if: github.event.inputs.build_type == 'native-arm64' || github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm                     # Arm64 hosted runner (GA since Sep 2024)
     timeout-minutes: 120
     env:
-      # The kernel platform repo expects these vars
       GKI_DEFCONFIG_FRAGMENT: ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig
     steps:
       - name: Checkout kernel‑platform source
         uses: actions/checkout@v4
         with:
-          submodules: recursive               # pulls rtw88, vendor blobs, etc.
+          submodules: recursive
 
       - name: Install host build dependencies
         run: |
@@ -46,7 +60,6 @@ jobs:
 
       - name: Add NetHunter fragment & module list
         run: |
-          # 1️⃣  Make sure the fragment exists (you can store it in the repo under nethunter-fragments/)
           mkdir -p ${{ github.workspace }}/nethunter-fragments
           cat > ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig <<'EOF'
 # ---- NetHunter fragment (copy the exact fragment from the previous answer) ----
@@ -179,7 +192,7 @@ CONFIG_OVERLAY_FS_XINO_AUTO=y
 CONFIG_OVERLAY_FS_METACOPY=y
 EOF
 
-          # 2️⃣  Hook the fragment into the common GKI config
+          # Hook the fragment into the common GKI config
           cat >> kernel_platform/build.config <<'EOF'
 
 # NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
@@ -187,7 +200,7 @@ KERNEL_DEFCONFIG_FRAGMENTS+= \
         ../../../../nethunter-fragments/nethunter_defconfig \
 EOF
 
-          # 3️⃣  Append NetHunter modules to the module‑order file used by the platform
+          # Append NetHunter modules to the platform module‑order file
           cat >> kernel_platform/msm-kernel/modules.list.msm.waipio <<'EOF'
 
 # NetHunter modules for gts8wifi (SM‑X700)
@@ -214,6 +227,7 @@ EOF
           ./build_kernel_GKI.sh
 
       - name: Upload build artefacts
+        if: ${{ github.event.inputs.upload_artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: gki-gts8wifi-${{ github.sha }}
@@ -225,10 +239,11 @@ EOF
             kernel_platform/out/dist/dtb.img
 
   # --------------------------------------------------------------
-  # 2️⃣  Cross‑compile on the free x86‑64 runner (optional)
+  # 2️⃣  Cross‑compile on the free x86‑64 runner (runs only when build_type == cross-x86)
   # --------------------------------------------------------------
   cross-x86:
     name: Cross‑compile GKI on x86‑64
+    if: github.event.inputs.build_type == 'cross-x86'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
@@ -246,10 +261,6 @@ EOF
             build-essential libssl-dev flex bison libelf-dev \
             device-tree-compiler kmod python3 \
             gcc-aarch64-linux-gnu
-
-          # The GKI build system expects the hermetic Clang.
-          # It will be downloaded automatically by the build script
-          # (see CLANG_PREBUILT_BIN in build.config). No extra step needed.
 
       - name: Add NetHunter fragment & module list
         # (identical to the block in the native job – copy‑paste)
@@ -292,6 +303,7 @@ EOF
           ./build_kernel_GKI.sh
 
       - name: Upload build artefacts
+        if: ${{ github.event.inputs.upload_artifacts == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: gki-gts8wifi-cross-${{ github.sha }}
