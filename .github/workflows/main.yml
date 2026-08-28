@@ -182,6 +182,7 @@ CONFIG_OVERLAY_FS_METACOPY=y
 EOF
 
           # ---- 4b. Hook the fragment into the common GKI config ---------------------------
+          mkdir -p kernel_platform
           cat >> kernel_platform/build.config <<'EOF'
 
 # NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
@@ -190,6 +191,7 @@ KERNEL_DEFCONFIG_FRAGMENTS+= \
 EOF
 
           # ---- 4c. Append NetHunter module names to the platform module‑order file -------
+          mkdir -p kernel_platform/msm-kernel
           cat >> kernel_platform/msm-kernel/modules.list.msm.waipio <<'EOF'
 
 # NetHunter modules for gts8wifi (SM‑X700)
@@ -231,4 +233,3 @@ EOF
             kernel_platform/out/dist/vendor_dlkm.img
             kernel_platform/out/dist/Image.lz4
             kernel_platform/out/dist/dtb.img
-            
