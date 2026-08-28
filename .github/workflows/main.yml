@@ -1,4 +1,4 @@
-# .github/workflows/name: Build GKI kernel for gts8wifi (Android 14 / U9)
+name: Build GKI kernel for gts8wifi (Android 14 / U9)
 
 # --------------------------------------------------------------
 # Triggers – push/PR for CI + manual dispatch for on‑demand builds
