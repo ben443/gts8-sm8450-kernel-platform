@@ -1,9 +1,4 @@
-# .github/workflows/build-gki-gts8wifi.yml
 name: Build GKI kernel for gts8wifi (Android 14 / U9)
-
-# --------------------------------------------------------------
-# 1️⃣  Triggers – the important one is `workflow_dispatch`
-# --------------------------------------------------------------
 on:
   push:
     branches: [main]               # adjust if your default branch is named differently
