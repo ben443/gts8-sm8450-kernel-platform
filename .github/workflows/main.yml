@@ -1,50 +1,41 @@
+# .github/workflows/build-gki-gts8wifi.yml
 name: Build GKI kernel for gts8wifi (Android 14 / U9)
 
+# --------------------------------------------------------------
+# 1️⃣  Triggers – the important one is `workflow_dispatch`
+# --------------------------------------------------------------
 on:
   push:
-    branches: [main, android14-5.10]          # adjust to your branch names
+    branches: [main]               # adjust if your default branch is named differently
   pull_request:
-    branches: [main, android14-5.10]
-  # --------------------------------------------------------------
-  #  ✅  Manual trigger – appears as “Run workflow” in the Actions UI
-  # --------------------------------------------------------------
-  workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'Which builder to run'
-        required: true
-        default: 'native-arm64'
-        type: choice
-        options:
-          - native-arm64      # runs on ubuntu-24.04-arm (real Arm64 host)
-          - cross-x86         # runs on ubuntu-latest (x86‑64 cross‑compile)
-      upload_artifacts:
-        description: 'Upload boot / vendor_boot / vendor_dlkm images as artifacts'
-        required: true
-        default: 'true'
-        type: boolean
+    branches: [main]
+  workflow_dispatch:               # ← this creates the “Run workflow” button
 
-# ------------------------------------------------------------------
-# The two jobs are **conditionally executed** based on the input above.
-# ------------------------------------------------------------------
+# --------------------------------------------------------------
+# 2️⃣  Single job – runs on a native Arm64 runner (fast, no QEMU)
+# --------------------------------------------------------------
 jobs:
-  # --------------------------------------------------------------
-  # 1️⃣  Native Arm64 build (runs only when build_type == native-arm64)
-  # --------------------------------------------------------------
-  native-arm64:
+  build-gki:
     name: Native Arm64 GKI build
-    if: github.event.inputs.build_type == 'native-arm64' || github.event_name != 'workflow_dispatch'
-    runs-on: ubuntu-24.04-arm                     # Arm64 hosted runner (GA since Sep 2024)
+    runs-on: ubuntu-24.04-arm          # Arm64 hosted runner (GA)
     timeout-minutes: 120
-    env:
-      GKI_DEFCONFIG_FRAGMENT: ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig
+
+    # ------------------------------------------------------------------
+    # 3️⃣  Steps – everything the build needs, fully self‑contained
+    # ------------------------------------------------------------------
     steps:
+      # --------------------------------------------------------------
+      # Checkout the kernel‑platform repo **with submodules**
+      # --------------------------------------------------------------
       - name: Checkout kernel‑platform source
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install host build dependencies
+      # --------------------------------------------------------------
+      # Install the host packages the GKI build expects
+      # --------------------------------------------------------------
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -52,17 +43,24 @@ jobs:
             device-tree-compiler kmod python3 \
             gcc-aarch64-linux-gnu
 
-      - name: Verify toolchain
+      # --------------------------------------------------------------
+      # Verify we really have an Arm64 tool‑chain
+      # --------------------------------------------------------------
+      - name: Show tool‑chain versions
         run: |
           clang --version
           aarch64-linux-gnu-gcc --version
           nproc
 
-      - name: Add NetHunter fragment & module list
+      # --------------------------------------------------------------
+      # 4️⃣  Add the NetHunter fragment **once** (inline, no extra files)
+      # --------------------------------------------------------------
+      - name: Inject NetHunter fragment & module list
         run: |
+          # ---- 4a. Create the fragment file -------------------------------------------------
           mkdir -p ${{ github.workspace }}/nethunter-fragments
           cat > ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig <<'EOF'
-# ---- NetHunter fragment (copy the exact fragment from the previous answer) ----
+# ---- NetHunter fragment (exact copy from the previous answer) ----
 CONFIG_RTL8812AU=m
 CONFIG_RTL8822BU=m
 CONFIG_RTL8822CU=m
@@ -192,7 +190,7 @@ CONFIG_OVERLAY_FS_XINO_AUTO=y
 CONFIG_OVERLAY_FS_METACOPY=y
 EOF
 
-          # Hook the fragment into the common GKI config
+          # ---- 4b. Hook the fragment into the common GKI config ---------------------------
           cat >> kernel_platform/build.config <<'EOF'
 
 # NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
@@ -200,7 +198,7 @@ KERNEL_DEFCONFIG_FRAGMENTS+= \
         ../../../../nethunter-fragments/nethunter_defconfig \
 EOF
 
-          # Append NetHunter modules to the platform module‑order file
+          # ---- 4c. Append NetHunter module names to the platform module‑order file -------
           cat >> kernel_platform/msm-kernel/modules.list.msm.waipio <<'EOF'
 
 # NetHunter modules for gts8wifi (SM‑X700)
@@ -220,93 +218,22 @@ overlay.ko
 loop.ko
 EOF
 
+      # --------------------------------------------------------------
+      # 5️⃣  Run the actual GKI build (the wrapper script supplied by the repo)
+      # --------------------------------------------------------------
       - name: Build GKI kernel (gki_dist)
         run: |
           cd kernel_platform
           chmod +x build_kernel_GKI.sh
           ./build_kernel_GKI.sh
 
-      - name: Upload build artefacts
-        if: ${{ github.event.inputs.upload_artifacts == 'true' }}
+      # --------------------------------------------------------------
+      # 6️⃣  Upload the flashable images as workflow artefacts
+      # --------------------------------------------------------------
+      - name: Upload artefacts
         uses: actions/upload-artifact@v4
         with:
           name: gki-gts8wifi-${{ github.sha }}
-          path: |
-            kernel_platform/out/dist/boot.img
-            kernel_platform/out/dist/vendor_boot.img
-            kernel_platform/out/dist/vendor_dlkm.img
-            kernel_platform/out/dist/Image.lz4
-            kernel_platform/out/dist/dtb.img
-
-  # --------------------------------------------------------------
-  # 2️⃣  Cross‑compile on the free x86‑64 runner (runs only when build_type == cross-x86)
-  # --------------------------------------------------------------
-  cross-x86:
-    name: Cross‑compile GKI on x86‑64
-    if: github.event.inputs.build_type == 'cross-x86'
-    runs-on: ubuntu-latest
-    timeout-minutes: 150
-    env:
-      GKI_DEFCONFIG_FRAGMENT: ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig
-    steps:
-      - name: Checkout kernel‑platform source
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install cross‑compile toolchain & deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential libssl-dev flex bison libelf-dev \
-            device-tree-compiler kmod python3 \
-            gcc-aarch64-linux-gnu
-
-      - name: Add NetHunter fragment & module list
-        # (identical to the block in the native job – copy‑paste)
-        run: |
-          mkdir -p ${{ github.workspace }}/nethunter-fragments
-          cat > ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig <<'EOF'
-# (same fragment as above – omitted for brevity)
-EOF
-
-          cat >> kernel_platform/build.config <<'EOF'
-
-# NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
-KERNEL_DEFCONFIG_FRAGMENTS+= \
-        ../../../../nethunter-fragments/nethunter_defconfig \
-EOF
-
-          cat >> kernel_platform/msm-kernel/modules.list.msm.waipio <<'EOF'
-
-# NetHunter modules for gts8wifi (SM‑X700)
-rtl8812au.ko
-rtl8822bu.ko
-rtl8822cu.ko
-rtl8821cu.ko
-rtl8188eu.ko
-rtl8192eu.ko
-rtl8814au.ko
-hid_raw.ko
-xt_TPROXY.ko
-nft_nat.ko
-nft_masq.ko
-nft_redir.ko
-overlay.ko
-loop.ko
-EOF
-
-      - name: Build GKI kernel (gki_dist)
-        run: |
-          cd kernel_platform
-          chmod +x build_kernel_GKI.sh
-          ./build_kernel_GKI.sh
-
-      - name: Upload build artefacts
-        if: ${{ github.event.inputs.upload_artifacts == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: gki-gts8wifi-cross-${{ github.sha }}
           path: |
             kernel_platform/out/dist/boot.img
             kernel_platform/out/dist/vendor_boot.img
