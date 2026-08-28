@@ -1,38 +1,51 @@
-name: Build GKI kernel for gts8wifi (Android 14 / U9)
-on:
-  workflow_dispatch:
+# .github/workflows/name: Build GKI kernel for gts8wifi (Android 14 / U9)
 
+# --------------------------------------------------------------
+# Triggers – push/PR for CI + manual dispatch for on‑demand builds
+# --------------------------------------------------------------
+on:
+  push:
+    branches: [main]               # change if your default branch differs
+  pull_request:
+    branches: [main]
+  workflow_dispatch:               # ← creates the “Run workflow” button
+
+# --------------------------------------------------------------
+# Single job – cross‑compile on the free ubuntu‑latest runner
+# --------------------------------------------------------------
 jobs:
   build-gki:
-    name: Native Arm64 GKI build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    name: Cross‑compile GKI (x86‑64 → arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150          # GKI build can take 30‑80 min
 
+    # ----------------------------------------------------------
+    # 1️⃣  Install everything the GKI build needs
+    # ----------------------------------------------------------
     steps:
-      - name: Checkout kernel-platform source
+      - name: Checkout kernel‑platform source (with submodules)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: recursive          # pulls rtw88, vendor blobs, etc.
 
-      - name: Install build dependencies
+      - name: Install host build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential libssl-dev flex bison libelf-dev \
             device-tree-compiler kmod python3 \
-            gcc-aarch64-linux-gnu clang lld llvm
+            gcc-aarch64-linux-gnu \
+            curl git
 
-      - name: Show tool-chain versions
+      # ----------------------------------------------------------
+      # 2️⃣  Inject the NetHunter fragment & module list **inline**
+      # ----------------------------------------------------------
+      - name: Add NetHunter fragment & module list
         run: |
-          clang --version
-          aarch64-linux-gnu-gcc --version
-          nproc
-
-      - name: Inject NetHunter fragment & module list
-        run: |
+          # ---- 2a. Create the fragment file -------------------------------------------------
           mkdir -p ${{ github.workspace }}/nethunter-fragments
           cat > ${{ github.workspace }}/nethunter-fragments/nethunter_defconfig <<'EOF'
-# NetHunter fragment
+# ---- NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10 ----
 CONFIG_RTL8812AU=m
 CONFIG_RTL8822BU=m
 CONFIG_RTL8822CU=m
@@ -162,18 +175,18 @@ CONFIG_OVERLAY_FS_XINO_AUTO=y
 CONFIG_OVERLAY_FS_METACOPY=y
 EOF
 
-          mkdir -p kernel_platform
+          # ---- 2b. Hook the fragment into the common GKI config ---------------------------
           cat >> kernel_platform/build.config <<'EOF'
 
-# NetHunter fragment for gts8wifi (SM-X700) - Android 14 GKI 5.10
+# NetHunter fragment for gts8wifi (SM‑X700) – Android 14 GKI 5.10
 KERNEL_DEFCONFIG_FRAGMENTS+= \
         ../../../../nethunter-fragments/nethunter_defconfig \
 EOF
 
-          mkdir -p kernel_platform/msm-kernel
+          # ---- 2c. Append NetHunter module names to the platform module‑order file -------
           cat >> kernel_platform/msm-kernel/modules.list.msm.waipio <<'EOF'
 
-# NetHunter modules for gts8wifi (SM-X700)
+# NetHunter modules for gts8wifi (SM‑X700)
 rtl8812au.ko
 rtl8822bu.ko
 rtl8822cu.ko
@@ -190,13 +203,19 @@ overlay.ko
 loop.ko
 EOF
 
+      # ----------------------------------------------------------
+      # 3️⃣  Run the official GKI wrapper script (it pulls the hermetic Clang)
+      # ----------------------------------------------------------
       - name: Build GKI kernel (gki_dist)
         run: |
           cd kernel_platform
           chmod +x build_kernel_GKI.sh
           ./build_kernel_GKI.sh
 
-      - name: Upload artifacts
+      # ----------------------------------------------------------
+      # 4️⃣  Upload the flashable images as artefacts
+      # ----------------------------------------------------------
+      - name: Upload build artefacts
         uses: actions/upload-artifact@v4
         with:
           name: gki-gts8wifi-${{ github.sha }}
