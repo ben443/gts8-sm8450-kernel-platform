@@ -1,5 +1,8 @@
 name: Build GKI Kernel
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
