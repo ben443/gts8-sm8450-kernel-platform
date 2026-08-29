@@ -19,7 +19,7 @@ export NETHUNTER_ENABLE="${NETHUNTER_ENABLE:-1}"
 NETHUNTER_FRAGMENT="${ANDROID_BUILD_TOP}/kernel_platform/msm-kernel/arch/arm64/configs/vendor/${CHIPSET_NAME}_nethunter_gki.fragment"
 if [ "${NETHUNTER_ENABLE}" = "1" ] && [ ! -f "${NETHUNTER_FRAGMENT}" ]; then
   echo "WARN: ${NETHUNTER_FRAGMENT} not found; disabling NetHunter fragment"
-  export NETHUNTER_ENABLE=1
+  export NETHUNTER_ENABLE=0
 fi
 
 export ANDROID_PRODUCT_OUT=${ANDROID_BUILD_TOP}/out/target/product/${MODEL}
