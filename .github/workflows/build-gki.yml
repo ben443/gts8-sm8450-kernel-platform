@@ -1,0 +1,204 @@
+name: Build GKI Kernel
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_target:
+        description: 'Build target (e.g. gts8wifi_eur_open)'
+        required: false
+        default: 'gts8wifi_eur_open'
+
+jobs:
+  build:
+    name: Build GKI Kernel
+    runs-on: ubuntu-22.04
+
+    env:
+      # ------------------------------------------------------------------ #
+      # Clang version — must match what build.config.msm.waipio.sec expects.
+      # SM8450 / waipio GKI builds require clang-r450784e (Clang 14).
+      # Update this if your build.config references a different revision.
+      # ------------------------------------------------------------------ #
+      CLANG_VERSION: r450784e
+      CLANG_BASE_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ------------------------------------------------------------------ #
+      # Host build dependencies
+      # ------------------------------------------------------------------ #
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ca-certificates \
+            ccache \
+            cpio \
+            curl \
+            flex \
+            git \
+            kmod \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            libyaml-dev \
+            lz4 \
+            make \
+            ninja-build \
+            pahole \
+            perl \
+            python3 \
+            python3-pip \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
+            zip \
+            zlib1g-dev \
+            zstd
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/.local/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
+          chmod a+x ~/.local/bin/repo
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      # ------------------------------------------------------------------ #
+      # AOSP Clang prebuilt toolchain
+      #
+      # We fetch only the specific clang-<VERSION> directory using a sparse
+      # git checkout — this avoids downloading the entire prebuilts repo
+      # (~20 GB) and pulls only the ~500 MB toolchain we actually need.
+      # The toolchain is cached by the clang version string so it is only
+      # re-downloaded when CLANG_VERSION changes.
+      # ------------------------------------------------------------------ #
+      - name: Cache AOSP Clang toolchain
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}
+          key: aosp-clang-${{ env.CLANG_VERSION }}
+
+      - name: Download AOSP Clang ${{ env.CLANG_VERSION }}
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          CLANG_DIR="kernel_platform/prebuilts/clang/host/linux-x86/clang-${CLANG_VERSION}"
+          mkdir -p "${CLANG_DIR}"
+
+          # Use a shallow sparse clone to fetch only the required clang directory
+          git clone \
+            --depth 1 \
+            --filter=blob:none \
+            --sparse \
+            --single-branch \
+            "${CLANG_BASE_URL}" \
+            /tmp/aosp-clang-prebuilts
+
+          cd /tmp/aosp-clang-prebuilts
+          git sparse-checkout set "clang-${CLANG_VERSION}"
+
+          # Copy into the kernel_platform prebuilts tree where build scripts expect it
+          cp -r "clang-${CLANG_VERSION}" \
+            "${GITHUB_WORKSPACE}/${CLANG_DIR}/../"
+
+      - name: Verify Clang installation
+        run: |
+          CLANG_BIN="kernel_platform/prebuilts/clang/host/linux-x86/clang-${CLANG_VERSION}/bin/clang"
+          if [ ! -f "${CLANG_BIN}" ]; then
+            echo "ERROR: clang binary not found at ${CLANG_BIN}"
+            exit 1
+          fi
+          echo "Clang version:"
+          "${CLANG_BIN}" --version
+
+      # ------------------------------------------------------------------ #
+      # ccache — keyed per branch so cold builds on a new branch still
+      # benefit from a warm cache from main.
+      # ------------------------------------------------------------------ #
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: 5G
+          key: gki-kernel-${{ github.ref_name }}
+          restore-keys: |
+            gki-kernel-main
+
+      - name: Configure git identity (required by build scripts)
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub Actions"
+          git config --global color.ui false
+
+      # ------------------------------------------------------------------ #
+      # Build
+      # ------------------------------------------------------------------ #
+      - name: Build kernel
+        env:
+          BUILD_TARGET: ${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}
+          # Force NetHunter fragment integration
+          NETHUNTER_ENABLE: "1"
+          # --- Toolchain wiring -------------------------------------------
+          # CLANG_PREBUILT_BIN is read by build/build.sh and build/_wrapper_common.sh
+          CLANG_PREBUILT_BIN: ${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin
+          # Standard Kbuild variables consumed by the top-level Makefile
+          CC:   "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/clang"
+          LD:   "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/ld.lld"
+          AR:   "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/llvm-ar"
+          NM:   "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/llvm-nm"
+          OBJCOPY: "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/llvm-objcopy"
+          OBJDUMP: "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/llvm-objdump"
+          READELF: "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/llvm-readelf"
+          STRIP:   "${{ github.workspace }}/kernel_platform/prebuilts/clang/host/linux-x86/clang-${{ env.CLANG_VERSION }}/bin/llvm-strip"
+          # LLVM=1 tells the kernel Makefile to use the llvm-* tool aliases above
+          LLVM: "1"
+          LLVM_IAS: "1"
+          # Cross-compile target
+          CROSS_COMPILE: aarch64-linux-gnu-
+          ARCH: arm64
+          # Wrap CC through ccache
+          KBUILD_COMPILER_STRING: "ccache clang"
+        run: |
+          # Prepend clang and ccache to PATH so any build sub-script that
+          # calls 'clang' or 'clang++' directly picks up the right binary.
+          export PATH="${CLANG_PREBUILT_BIN}:/usr/lib/ccache:${PATH}"
+          chmod +x build_kernel_GKI.sh
+          bash build_kernel_GKI.sh
+
+      # ------------------------------------------------------------------ #
+      # Artifacts
+      # ------------------------------------------------------------------ #
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}-${{ github.sha }}
+          path: |
+            out/**/Image
+            out/**/Image.gz
+            out/**/*.ko
+            out/**/System.map
+            out/**/dtbo.img
+            out/**/*.dtb
+          retention-days: 7
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.sha }}
+          path: out/**/*.log
+          retention-days: 3
