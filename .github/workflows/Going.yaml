@@ -1,92 +1,110 @@
-name: Build SM8450 Custom Kernel
+name: Build GKI Kernel
 
 on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
-
-concurrency:
-  group: kernel-build-${{ github.ref }}
-  cancel-in-progress: true
+    inputs:
+      build_target:
+        description: 'Build target (e.g. gts8wifi_eur_open)'
+        required: false
+        default: 'gts8wifi_eur_open'
 
 jobs:
-  build-kernel:
+  build:
+    name: Build GKI Kernel
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
 
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@8ade135a41bc03ea155e62e844d188df1ea18608 # v4.1.0
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
-          lfs: true
-          submodules: recursive
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@v10
-        with:
-          root-reserve-mb: 8192
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-
-      - name: Install Build Dependencies
+      - name: Install build dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -y
           sudo apt-get install -y \
-            bc bison build-essential flex \
-            libssl-dev libncurses-dev \
-            zip unzip cpio rsync git \
-            dwarves elfutils pahole
+            bc \
+            bison \
+            build-essential \
+            ca-certificates \
+            ccache \
+            cpio \
+            curl \
+            flex \
+            git \
+            kmod \
+            libelf-dev \
+            libncurses-dev \
+            libssl-dev \
+            libyaml-dev \
+            lz4 \
+            make \
+            ninja-build \
+            pahole \
+            perl \
+            python3 \
+            python3-pip \
+            rsync \
+            unzip \
+            wget \
+            xz-utils \
+            zip \
+            zlib1g-dev \
+            zstd
 
-      - name: Execute Build Script
-        shell: bash
+      - name: Install repo tool
         run: |
-          set -euo pipefail
-          chmod +x build_kernel_GKI.sh
-          ./build_kernel_GKI.sh
+          mkdir -p ~/.local/bin
+          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
+          chmod a+x ~/.local/bin/repo
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
-      - name: Collect artifacts
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p artifacts/kernel artifacts/modules
-
-          mapfile -t IMAGES < <(find out -type f -name 'Image' 2>/dev/null || true)
-          if [ ${#IMAGES[@]} -eq 0 ]; then
-            echo "No kernel Image found under out/**/Image"
-            exit 1
-          fi
-          for img in "${IMAGES[@]}"; do
-            rel="${img#out/}"
-            mkdir -p "artifacts/kernel/$(dirname "$rel")"
-            cp -av "$img" "artifacts/kernel/$rel"
-          done
-
-          mapfile -t MODULES < <(find out -type f -name '*.ko' 2>/dev/null || true)
-          if [ ${#MODULES[@]} -eq 0 ]; then
-            echo "No .ko modules found under out/**/*.ko"
-            exit 1
-          fi
-          for ko in "${MODULES[@]}"; do
-            rel="${ko#out/}"
-            mkdir -p "artifacts/modules/$(dirname "$rel")"
-            cp -av "$ko" "artifacts/modules/$rel"
-          done
-
-          {
-            echo "Kernel Images:"
-            printf '%s\n' "${IMAGES[@]}"
-            echo
-            echo "Kernel Modules:"
-            printf '%s\n' "${MODULES[@]}"
-          } > artifacts/manifest.txt
-
-      - name: Upload Kernel Artifacts
-        if: success()
-        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          name: Tab-S8-Kernel-and-Modules-${{ github.run_number }}
-          path: artifacts/
-          if-no-files-found: error
-          retention-days: 14
+          max-size: 5G
+          key: gki-kernel-${{ github.ref_name }}
+
+      - name: Configure git
+        run: |
+          git config --global user.email "ci@github.com"
+          git config --global user.name "GitHub Actions"
+          git config --global color.ui false
+
+      - name: Build kernel
+        env:
+          BUILD_TARGET: ${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}
+          # Force NetHunter fragment integration
+          NETHUNTER_ENABLE: "1"
+          # Use ccache
+          CC: "ccache gcc"
+          CXX: "ccache g++"
+        run: |
+          chmod +x build_kernel_GKI.sh
+          bash build_kernel_GKI.sh
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}-${{ github.sha }}
+          path: |
+            out/**/Image
+            out/**/Image.gz
+            out/**/*.ko
+            out/**/System.map
+          retention-days: 7
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.sha }}
+          path: out/**/*.log
+          retention-days: 3
