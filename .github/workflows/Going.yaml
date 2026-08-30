@@ -82,6 +82,8 @@ jobs:
           BUILD_TARGET: ${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}
           # Force NetHunter fragment integration
           NETHUNTER_ENABLE: "1"
+          # Use ThinLTO to avoid runner OOM/timeout during full LTO vmlinux.o link
+          LTO: thin
           # Use ccache
           CC: "ccache gcc"
           CXX: "ccache g++"
