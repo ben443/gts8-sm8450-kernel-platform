@@ -31,7 +31,9 @@ CONFIG_MAC80211_DEBUGFS=y
 CONFIG_MAC80211_MESSAGE_TRACING=y
 CONFIG_MAC80211_DEBUG_MENU=y
 
-# ---------- HID‑raw / USB‑HID (needed for keyboard/mouse injection) ----------
+# ---------- USB‑HID (needed for keyboard/mouse injection) ----------
+# Note: CONFIG_HID_RAW is already =y in the base GKI config and is not
+# set here; it is compiled into the GKI Image, not as a module.
 CONFIG_USB_HID=y
 CONFIG_USB_HIDDEV=y
 
