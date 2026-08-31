@@ -21,6 +21,36 @@ CONFIG_MAC80211_DEBUG_MENU=y
 # ---------- HID‑raw / USB‑HID (needed for keyboard/mouse injection) ----------
 CONFIG_USB_HIDDEV=y
 
+# ---------- USB Serial adapters (CP210x, FTDI, CH341, PL2303, option modems) ----------
+CONFIG_USB_SERIAL=m
+CONFIG_USB_SERIAL_GENERIC=y
+CONFIG_USB_SERIAL_CP210X=m
+CONFIG_USB_SERIAL_CH341=m
+CONFIG_USB_SERIAL_FTDI_SIO=m
+CONFIG_USB_SERIAL_PL2303=m
+CONFIG_USB_SERIAL_WWAN=m
+CONFIG_USB_SERIAL_OPTION=m
+
+# ---------- USB network adapters (RNDIS tethering, QMI modems) ----------
+CONFIG_USB_NET_RNDIS_HOST=m
+CONFIG_USB_NET_QMI_WWAN=m
+
+# ---------- Bluetooth USB dongle ----------
+CONFIG_BT_HCIBTUSB=m
+
+# ---------- WLAN vendor subdirectory selectors (required for USB WiFi below) ----------
+CONFIG_WLAN_VENDOR_ATH=y
+CONFIG_WLAN_VENDOR_MEDIATEK=y
+CONFIG_WLAN_VENDOR_RALINK=y
+CONFIG_WLAN_VENDOR_REALTEK=y
+
+# ---------- USB WiFi adapter drivers (vendor DLKM modules → vendor_dlkm.img) ----------
+CONFIG_ATH9K_HTC=m
+CONFIG_MT7601U=m
+CONFIG_R8188EU=m
+CONFIG_RTL8XXXU=m
+CONFIG_RTL8XXXU_UNTESTED=y
+
 # ---------- Netfilter / iptables extensions used by NetHunter tools ----------
 CONFIG_NETFILTER_XT_MATCH_HASHLIMIT=y
 CONFIG_NETFILTER_XT_MATCH_RECENT=m
