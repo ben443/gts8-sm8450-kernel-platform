@@ -19,8 +19,6 @@ CONFIG_MAC80211_MESSAGE_TRACING=y
 CONFIG_MAC80211_DEBUG_MENU=y
 
 # ---------- HID‑raw / USB‑HID (needed for keyboard/mouse injection) ----------
-CONFIG_HIDRAW=y
-CONFIG_USB_HID=y
 CONFIG_USB_HIDDEV=y
 
 # ---------- Netfilter / iptables extensions used by NetHunter tools ----------
