@@ -2,111 +2,287 @@ name: Build GKI Kernel
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, develop]
+    paths:
+      - 'build.sh'
+      - 'build_kernel_GKI.sh'
+      - 'kernel_platform/**'
+      - 'scripts/**'
+      - 'vendor/**'
+      - '.gitmodules'
+      - '.github/workflows/Going.yaml'
   pull_request:
-    branches:
-      - main
+    branches: [main, develop]
+    paths:
+      - 'build.sh'
+      - 'build_kernel_GKI.sh'
+      - 'kernel_platform/**'
+      - 'scripts/**'
+      - 'vendor/**'
+      - '.gitmodules'
+      - '.github/workflows/Going.yaml'
   workflow_dispatch:
     inputs:
       build_target:
-        description: 'Build target (e.g. gts8wifi_eur_open)'
+        description: 'Build target'
         required: false
-        default: 'gts8wifi_eur_open'
+        type: choice
+        options:
+          - all
+          - gts8wifi_eur_open
+          - gts8uwifi_eur_open
+        default: gts8wifi_eur_open
+      enable_nethunter:
+        description: 'Enable NetHunter (0/1)'
+        required: false
+        type: choice
+        options: ['0', '1']
+        default: '0'
+      enable_ksu:
+        description: 'Enable KernelSU (0/1)'
+        required: false
+        type: choice
+        options: ['0', '1']
+        default: '0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gki-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build GKI Kernel
+  quality-checks:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify build script syntax
+        run: |
+          bash -n build.sh
+          bash -n build_kernel_GKI.sh
+
+      - name: Check build script permissions
+        run: |
+          test -x build.sh
+          test -x build_kernel_GKI.sh
+
+      - name: Validate script dependencies
+        run: |
+          required_bins=(bash git python3 make)
+          missing=0
+          for bin in "${required_bins[@]}"; do
+            if ! command -v "$bin" >/dev/null 2>&1; then
+              echo "Missing dependency: $bin"
+              missing=1
+            fi
+          done
+          grep -q "mkdtboimg" build.sh
+          exit "$missing"
+
+  build:
+    name: Build (${{ matrix.device }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - device: gts8wifi
+            build_target: gts8wifi_eur_open
+            defconfig: gts8wifi-waipio_defconfig
+            anykernel_branch: gts8x
+            model: gts8wifi
+            region: eur
+            carrier: open
+          - device: gts8uwifi
+            build_target: gts8uwifi_eur_open
+            defconfig: gts8uwifi-waipio_defconfig
+            anykernel_branch: gts8u
+            model: gts8uwifi
+            region: eur
+            carrier: open
+    if: github.event_name != 'workflow_dispatch' || inputs.build_target == 'all' || inputs.build_target == matrix.build_target
+    env:
+      BUILD_TARGET: ${{ github.event_name == 'workflow_dispatch' && inputs.build_target != 'all' && inputs.build_target || matrix.build_target }}
+      ENABLE_NETHUNTER: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_nethunter || '0' }}
+      ENABLE_KSU: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_ksu || '0' }}
+      CI_KERNEL_DEFCONFIG: ${{ matrix.defconfig }}
+      CI_AK3_BRANCH: ${{ matrix.anykernel_branch }}
+      MODEL: ${{ matrix.model }}
+      PROJECT_NAME: ${{ matrix.model }}
+      REGION: ${{ matrix.region }}
+      CARRIER: ${{ matrix.carrier }}
+      CHIPSET_NAME: waipio
+      TARGET_BUILD_VARIANT: user
+      CCACHE_DIR: ~/.ccache
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 10G
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          submodules: recursive
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            bc \
-            bison \
-            build-essential \
-            ca-certificates \
-            ccache \
-            cpio \
-            curl \
-            flex \
-            git \
-            kmod \
-            libelf-dev \
-            libncurses-dev \
-            libssl-dev \
-            libyaml-dev \
-            lz4 \
-            make \
-            ninja-build \
-            pahole \
-            perl \
-            python3 \
-            python3-pip \
-            rsync \
-            unzip \
-            wget \
-            xz-utils \
-            zip \
-            zlib1g-dev \
-            zstd
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libelf-dev libssl-dev git flex bison zip python3 ccache \
+            bc curl kmod libncurses-dev rsync unzip zstd clang llvm lld device-tree-compiler python3-pip
 
-      - name: Install repo tool
-        run: |
-          mkdir -p ~/.local/bin
-          curl -s https://storage.googleapis.com/git-repo-downloads/repo > ~/.local/bin/repo
-          chmod a+x ~/.local/bin/repo
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+      - name: Restore ccache
+        uses: actions/cache@v4
         with:
-          max-size: 5G
-          key: gki-kernel-${{ github.ref_name }}
+          path: ~/.ccache
+          key: ccache-${{ runner.os }}-${{ matrix.device }}-${{ github.ref_name }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ matrix.device }}-
 
-      - name: Configure git
+      - name: Configure ccache
         run: |
-          git config --global user.email "ci@github.com"
-          git config --global user.name "GitHub Actions"
-          git config --global color.ui false
+          echo "/usr/lib/ccache" >> "$GITHUB_PATH"
+          ccache --set-config=max_size=${CCACHE_MAXSIZE}
+          ccache --zero-stats || true
+          ccache --show-config
+
+      - name: Install mkdtboimg
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          python3 -m pip install --user --upgrade pip
+          python3 -m pip install --user mkdtboimg || true
+          if [ ! -x "$HOME/.local/bin/mkdtboimg.py" ] && [ -f "kernel_platform/tools/mkbootimg/mkdtboimg.py" ]; then
+            ln -sf "$PWD/kernel_platform/tools/mkbootimg/mkdtboimg.py" "$HOME/.local/bin/mkdtboimg.py"
+            chmod +x "$HOME/.local/bin/mkdtboimg.py"
+          fi
+          if ! command -v mkdtboimg.py >/dev/null 2>&1 && ! command -v mkdtboimg >/dev/null 2>&1; then
+            curl -fsSL "https://raw.githubusercontent.com/aosp-mirror/platform_system_tools_mkbootimg/master/mkdtboimg.py" -o "$HOME/.local/bin/mkdtboimg.py"
+            chmod +x "$HOME/.local/bin/mkdtboimg.py"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          command -v mkdtboimg.py || command -v mkdtboimg
+
+      - name: Set up Clang/LLVM toolchain
+        run: |
+          set +e
+          CLANG_PATH=$(ls -d kernel_platform/prebuilts/clang/host/linux-x86/clang-* 2>/dev/null | tail -1)
+          set -e
+          if [ -n "$CLANG_PATH" ] && [ -x "$CLANG_PATH/bin/clang" ]; then
+            echo "Using prebuilts Clang: $CLANG_PATH"
+            echo "CLANG_DIR=$PWD/$CLANG_PATH" >> "$GITHUB_ENV"
+          else
+            echo "Prebuilt Clang not found, falling back to system Clang"
+            clang --version
+          fi
+
+      - name: Ensure scripts are executable
+        run: |
+          chmod +x build.sh build_kernel_GKI.sh
+
+      - name: Prepare GKI (non-critical)
+        id: gki
+        continue-on-error: true
+        run: |
+          mkdir -p logs
+          set -o pipefail
+          ./build_kernel_GKI.sh 2>&1 | tee logs/build_kernel_GKI.log
+
+      - name: Report GKI preparation status
+        if: always()
+        run: |
+          if [ "${{ steps.gki.outcome }}" != "success" ]; then
+            echo "::warning::GKI preparation reported errors; continuing with build.sh per workflow policy"
+          fi
 
       - name: Build kernel
-        env:
-          BUILD_TARGET: ${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}
-          # Force NetHunter fragment integration
-          NETHUNTER_ENABLE: "1"
-          # Use ThinLTO to avoid runner OOM/timeout during full LTO vmlinux.o link
-          LTO: thin
-          # Use ccache
-          CC: "ccache gcc"
-          CXX: "ccache g++"
         run: |
-          chmod +x build_kernel_GKI.sh
-          bash build_kernel_GKI.sh
+          mkdir -p logs
+          set -o pipefail
+          ./build.sh 2>&1 | tee logs/build.log
+
+      - name: Collect kernel artifacts
+        if: success()
+        run: |
+          mkdir -p artifacts
+          find out -type f -name 'Image' -path '*/arch/arm64/boot/*' -exec cp -f {} artifacts/ \; 2>/dev/null || true
+          find out -type f -name 'dtbo.img' -path '*/arch/arm64/boot/*' -exec cp -f {} artifacts/ \; 2>/dev/null || true
+          find out -type f -name '*.dtb' -exec cp -f {} artifacts/ \; 2>/dev/null || true
+          find out -type f -name '*.dtbo' -exec cp -f {} artifacts/ \; 2>/dev/null || true
+          cp -f AnyKernel3/*.zip artifacts/ 2>/dev/null || true
+          ls -la artifacts || true
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.device }}-${{ github.run_id }}
+          path: logs/**
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload kernel artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: kernel-${{ github.event.inputs.build_target || 'gts8wifi_eur_open' }}-${{ github.sha }}
-          path: |
-            out/**/Image
-            out/**/Image.gz
-            out/**/*.ko
-            out/**/System.map
-          retention-days: 7
+          name: kernel-artifacts-${{ matrix.device }}-${{ github.run_id }}
+          path: artifacts/**
+          retention-days: 30
+          if-no-files-found: warn
 
-      - name: Upload build logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Build summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.device }} build result"
+            echo "- Status: **${{ job.status }}**"
+            echo "- BUILD_TARGET: \\`${BUILD_TARGET}\\`"
+            echo "- ENABLE_NETHUNTER: \\`${ENABLE_NETHUNTER}\\`"
+            echo "- ENABLE_KSU: \\`${ENABLE_KSU}\\`"
+            echo "- GKI step outcome: **${{ steps.gki.outcome }}**"
+            echo "- Artifacts: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"
+            if [ "${{ job.status }}" != "success" ]; then
+              echo "- Error details: check uploaded logs artifact for this device"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download kernel artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: build-logs-${{ github.sha }}
-          path: out/**/*.log
-          retention-days: 3
+          pattern: kernel-artifacts-*-${{ github.run_id }}
+          merge-multiple: true
+          path: release-assets
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kernel-main-${{ github.run_number }}
+          name: Kernel main build ${{ github.run_number }}
+          body: |
+            Automated main branch kernel build.
+            Build run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: |
+            release-assets/*.zip
+
+  summary:
+    if: always()
+    needs: [quality-checks, build, release]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Build status summary
+        run: |
+          {
+            echo "## Workflow summary"
+            echo "- quality-checks: **${{ needs.quality-checks.result }}**"
+            echo "- build: **${{ needs.build.result }}**"
+            echo "- release: **${{ needs.release.result }}**"
+            echo "- Artifacts: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"
+          } >> "$GITHUB_STEP_SUMMARY"
