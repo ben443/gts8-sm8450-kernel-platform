@@ -9,6 +9,14 @@
 #
 source "arch/$(SRCARCH)/Kconfig"
 
+config ARCH_CONFIGURES_CPU_MITIGATIONS
+	bool
+
+if !ARCH_CONFIGURES_CPU_MITIGATIONS
+config CPU_MITIGATIONS
+	def_bool y
+endif
+
 menu "General architecture-dependent options"
 
 config CRASH_CORE
@@ -728,6 +736,13 @@ config CFI_PERMISSIVE
 	  When selected, Control Flow Integrity (CFI) violations result in a
 	  warning instead of a kernel panic. This option is useful for finding
 	  CFI violations during development.
+
+config LLVM_POLLY
+	bool "Enable LLVM's polyhedral loop optimizer (Polly)"
+	help
+	  This option enables LLVM's polyhedral loop optimizer known as Polly.
+	  Polly can optimize loops in the kernel for improved cache locality.
+	  This requires an LLVM toolchain explicitly compiled with Polly support.
 
 config HAVE_ARCH_WITHIN_STACK_FRAMES
 	bool

@@ -131,7 +131,7 @@ static int dt_to_map_one_config(struct pinctrl *p,
 			of_node_put(np_pctldev);
 			ret = driver_deferred_probe_check_state(p->dev);
 			/* keep deferring if modules are enabled */
-			if (IS_ENABLED(CONFIG_MODULES) && !allow_default && ret < 0)
+			if (IS_ENABLED(CONFIG_INTEGRATE_MODULES) && IS_ENABLED(CONFIG_MODULES) && !allow_default && ret < 0)
 				ret = -EPROBE_DEFER;
 			return ret;
 		}
@@ -220,14 +220,16 @@ int pinctrl_dt_to_map(struct pinctrl *p, struct pinctrl_dev *pctldev)
 	for (state = 0; ; state++) {
 		/* Retrieve the pinctrl-* property */
 		propname = kasprintf(GFP_KERNEL, "pinctrl-%d", state);
-		if (!propname)
-			return -ENOMEM;
+		if (!propname) {
+			ret = -ENOMEM;
+			goto err;
+		}
 		prop = of_find_property(np, propname, &size);
 		kfree(propname);
 		if (!prop) {
 			if (state == 0) {
-				of_node_put(np);
-				return -ENODEV;
+				ret = -ENODEV;
+				goto err;
 			}
 			break;
 		}

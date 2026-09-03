@@ -953,17 +953,16 @@ void wake_up_all_idle_cpus(void)
 {
 	int cpu;
 
-	preempt_disable();
-	for_each_online_cpu(cpu) {
-		if (cpu == smp_processor_id())
-			continue;
-
+	for_each_possible_cpu(cpu) {
+		preempt_disable();
+		if (cpu != smp_processor_id() && cpu_online(cpu)) {
 #if IS_ENABLED(CONFIG_SUSPEND)
-		if (s2idle_state == S2IDLE_STATE_ENTER || cpu_active(cpu))
+			if (s2idle_state == S2IDLE_STATE_ENTER || cpu_active(cpu))
 #endif
-			wake_up_if_idle(cpu);
+				wake_up_if_idle(cpu);
+		}
+		preempt_enable();
 	}
-	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(wake_up_all_idle_cpus);
 
@@ -1034,6 +1033,7 @@ int smp_call_on_cpu(unsigned int cpu, int (*func)(void *), void *par, bool phys)
 
 	queue_work_on(cpu, system_wq, &sscs.work);
 	wait_for_completion(&sscs.done);
+	destroy_work_on_stack(&sscs.work);
 
 	return sscs.ret;
 }

@@ -31,12 +31,6 @@
 #include "avc_ss.h"
 #include "classmap.h"
 
-// [ SEC_SELINUX_PORTING_COMMON
-#ifdef SEC_SELINUX_DEBUG
-#include <linux/signal.h>
-#endif
-// ] SEC_SELINUX_PORTING_COMMON
-
 #define CREATE_TRACE_POINTS
 #include <trace/events/avc.h>
 
@@ -341,12 +335,12 @@ static int avc_add_xperms_decision(struct avc_node *node,
 {
 	struct avc_xperms_decision_node *dest_xpd;
 
-	node->ae.xp_node->xp.len++;
 	dest_xpd = avc_xperms_decision_alloc(src->used);
 	if (!dest_xpd)
 		return -ENOMEM;
 	avc_copy_xperms_decision(&dest_xpd->xpd, src);
 	list_add(&dest_xpd->xpd_list, &node->ae.xp_node->xpd_head);
+	node->ae.xp_node->xp.len++;
 	return 0;
 }
 
@@ -1034,56 +1028,6 @@ static noinline int avc_denied(struct selinux_state *state,
 {
 	if (flags & AVC_STRICT)
 		return -EACCES;
-
-// [ SEC_SELINUX_PORTING_COMMON
-#ifdef SEC_SELINUX_DEBUG
-	if ((requested & avd->auditallow) && !(avd->flags & AVD_FLAGS_PERMISSIVE)) {
-			char *scontext, *tcontext;
-			const char **perms;
-			int i, perm;
-			int rc1, rc2;
-			u32 scontext_len, tcontext_len;
-	
-			perms = secclass_map[tclass-1].perms;
-			i = 0;
-			perm = 1;
-			while (i < (sizeof(requested) * 8)) {
-				if ((perm & requested) && perms[i])
-					break;
-				i++;
-				perm <<= 1;
-			}
-	
-			rc1 = security_sid_to_context(state, ssid, &scontext, &scontext_len);
-			rc2 = security_sid_to_context(state, tsid, &tcontext, &tcontext_len);
-	
-			if (rc1 || rc2) {
-				pr_err("SELinux DEBUG : %s: ssid=%d tsid=%d tclass=%s perm=%s requested(%d) auditallow(%d)\n",
-			       __func__, ssid, tsid, secclass_map[tclass-1].name, perms[i], requested, avd->auditallow);
-			} else {
-				pr_err("SELinux DEBUG : %s: scontext=%s tcontext=%s tclass=%s perm=%s requested(%d) auditallow(%d)\n",
-			       __func__, scontext, tcontext, secclass_map[tclass-1].name, perms[i], requested, avd->auditallow);
-			}
-
-    		/* print call stack */
-    		pr_err("SELinux DEBUG : FATAL denial and start dump_stack\n");
-	    	dump_stack();
-
-		    /* enforcing : SIGABRT and take debuggerd log */
-            if (!(avd->flags & AVD_FLAGS_PERMISSIVE)) {
-			    pr_err("SELinux DEBUG : send SIGABRT to current tsk\n");
-			    send_sig(SIGABRT, current, 2);
-		    }
-
-		    if (!rc1)
-			    kfree(scontext);
-	        if (!rc2)
-			    kfree(tcontext);
-
-	}
-#endif
-// ] SEC_SELINUX_PORTING_COMMON
-
 
 	if (enforcing_enabled(state) &&
 	    !(avd->flags & AVD_FLAGS_PERMISSIVE))

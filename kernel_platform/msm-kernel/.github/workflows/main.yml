@@ -1,0 +1,28 @@
+name: Kernel Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make build.sh executable
+        run: chmod +x build.sh
+
+      - name: Run build.sh
+        run: ./build.sh
+
+      - name: Archive build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-build-artifacts
+          path: |
+            out/
+            *.img
+            *.zip
+            *.tar*

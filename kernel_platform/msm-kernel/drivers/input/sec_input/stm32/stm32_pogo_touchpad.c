@@ -136,6 +136,7 @@ struct stm32_touchpad_dev {
 	struct stm32_point_data			prev_touch_info;
 	int					move_count[STM32_TOUCH_MAX_FINGER_NUM];
 	int					touch_count;
+	int					prev_touch_count;
 	u8					button;
 	u8					button_state;
 	int					button_code;
@@ -145,6 +146,18 @@ struct stm32_touchpad_dev {
 };
 
 extern void pogo_get_tc_resolution(int *x, int *y);
+
+static void stm32_set_multi_finger_gesture(struct stm32_touchpad_dev *stm32)
+{
+	int count = stm32->touch_count;
+
+	if (stm32->prev_touch_count == count)
+		return;
+
+	input_mt_report_finger_count(stm32->input_dev, count);
+
+	stm32->prev_touch_count = count;
+}
 
 static void stm32_release_all_finger(struct stm32_touchpad_dev *stm32)
 {
@@ -181,6 +194,8 @@ static void stm32_release_all_finger(struct stm32_touchpad_dev *stm32)
 
 	input_report_key(stm32->input_dev, BTN_TOUCH, 0);
 	input_report_key(stm32->input_dev, BTN_TOOL_FINGER, 0);
+	input_report_key(stm32->input_dev, BTN_TOOL_DOUBLETAP, 0);
+	input_report_key(stm32->input_dev, BTN_TOOL_TRIPLETAP, 0);
 
 	input_sync(stm32->input_dev);
 }
@@ -392,6 +407,8 @@ static void stm32_pogo_touchpad_event(struct stm32_touchpad_dev *stm32, char *ev
 
 	memcpy(&touch_info, event, len);
 	pogo_get_tc_resolution(&res_x, &res_y);
+	stm32->touch_count = touch_info.finger_cnt & 0xf;
+	stm32_set_multi_finger_gesture(stm32);
 
 	if (stm32_bit_test(touch_info.status, BIT_ICON_EVENT)) {
 		if (stm32_bit_test(touch_info.button_info, BIT_O_ICON0_DOWN)) {
@@ -416,8 +433,6 @@ static void stm32_pogo_touchpad_event(struct stm32_touchpad_dev *stm32, char *ev
 			stm32_pogo_xy_convert(stm32, &lx, &ly);
 
 			if (stm32_bit_test(prev_sub_status, SUB_BIT_EXIST)) {
-				if (stm32->touch_count > 0)
-					stm32->touch_count--;
 				if (stm32->touch_count == 0)
 					input_report_key(stm32->input_dev, BTN_TOUCH, 0);
 				else
@@ -461,7 +476,6 @@ static void stm32_pogo_touchpad_event(struct stm32_touchpad_dev *stm32, char *ev
 
 			if (stm32_bit_test(sub_status, SUB_BIT_DOWN)) {
 				/* press */
-				stm32->touch_count++;
 				latest_id = i;
 
 				if ((touch_info.coords[i].x < res_x / 2) || (touch_info.coords[i].y < (res_y * 3) / 4))
@@ -479,7 +493,6 @@ static void stm32_pogo_touchpad_event(struct stm32_touchpad_dev *stm32, char *ev
 
 				/* touch moved without press */
 				if (stm32->coord[i].action == TOUCH_ACTION_RELEASE) {
-					stm32->touch_count++;
 					latest_id = i;
 					stm32->coord[i].current_time = ktime_get();
 				}
@@ -518,8 +531,6 @@ static void stm32_pogo_touchpad_event(struct stm32_touchpad_dev *stm32, char *ev
 
 			stm32_pogo_xy_convert(stm32, &lx, &ly);
 
-			if (stm32->touch_count > 0)
-				stm32->touch_count--;
 			if (stm32->touch_count == 0)
 				input_report_key(stm32->input_dev, BTN_TOUCH, 0);
 			else
@@ -569,6 +580,7 @@ out_sync:
 		}
 	}
 
+	stm32->touch_count = 0;
 	input_sync(stm32->input_dev);
 }
 
@@ -637,6 +649,8 @@ static int stm32_touchpad_set_input_dev(struct stm32_touchpad_dev *device_data)
 	set_bit(INPUT_PROP_POINTER, input_dev->propbit);
 	set_bit(BTN_TOUCH, input_dev->keybit);
 	set_bit(BTN_TOOL_FINGER, input_dev->keybit);
+	set_bit(BTN_TOOL_DOUBLETAP, input_dev->keybit);
+	set_bit(BTN_TOOL_TRIPLETAP, input_dev->keybit);
 	set_bit(BTN_LEFT, input_dev->keybit);
 	set_bit(BTN_RIGHT, input_dev->keybit);
 	device_data->button_code = BTN_LEFT;
@@ -652,6 +666,9 @@ static int stm32_touchpad_set_input_dev(struct stm32_touchpad_dev *device_data)
 		input_set_abs_params(input_dev, ABS_MT_POSITION_Y,
 				0, device_data->dtdata->max_y - 1, 0, 0);
 	}
+
+	input_abs_set_res(input_dev, ABS_MT_POSITION_X, 15);
+	input_abs_set_res(input_dev, ABS_MT_POSITION_Y, 15);
 	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	input_mt_init_slots(input_dev, STM32_TOUCH_MAX_FINGER_NUM, INPUT_MT_POINTER);
 
