@@ -1260,7 +1260,10 @@ static int fastrpc_mmap_find(struct fastrpc_file *fl, int fd,
 
 	if ((va + len) < va)
 		return -EFAULT;
-	if (mflags == ADSP_MMAP_DMA_BUFFER) {
+	if (mflags == ADSP_MMAP_HEAP_ADDR ||
+				 mflags == ADSP_MMAP_REMOTE_HEAP_ADDR) {
+		return -EFAULT;
+	} else if (mflags == ADSP_MMAP_DMA_BUFFER) {
 		hlist_for_each_entry_safe(map, n, &fl->maps, hn) {
 			if (map->buf == buf) {
 				if (refs) {
@@ -1416,9 +1419,8 @@ static void fastrpc_mmap_free(struct fastrpc_mmap *map, uint32_t flags)
 	} else {
 		if (map->refs)
 			map->refs--;
-		/* flags is passed as 1 during fastrpc_file_free
-		 * (ie process exit), so that maps will be cleared
-		 * even though references are present.
+		/* flags is passed as 1 during fastrpc_file_free (ie process exit),
+		 * so that maps will be cleared even though references are present.
 		 */
 		if (!map->refs && !map->ctx_refs && !map->dma_handle_refs)
 			hlist_del_init(&map->hn);
@@ -1582,6 +1584,11 @@ static int fastrpc_mmap_create(struct fastrpc_file *fl, int fd, struct dma_buf *
 				goto bail;
 		}
 	} else if (mflags == FASTRPC_MAP_FD_NOMAP) {
+		if (map->attr & FASTRPC_ATTR_KEEP_MAP) {
+			ADSPRPC_ERR("Invalid attribute 0x%x for fd %d\n", map->attr, fd);
+			err = -EINVAL;
+			goto bail;
+		}
 		VERIFY(err, !IS_ERR_OR_NULL(map->buf = dma_buf_get(fd)));
 		if (err) {
 			ADSPRPC_ERR("dma_buf_get failed for fd %d ret %ld\n",
@@ -2814,8 +2821,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			ctx->maps[i]->dma_handle_refs++;
 		if (err) {
 			for (j = bufs; j < i; j++) {
-				if (ctx->maps[j] &&
-					ctx->maps[j]->dma_handle_refs) {
+				if (ctx->maps[j] && ctx->maps[j]->dma_handle_refs) {
 					ctx->maps[j]->dma_handle_refs--;
 					fastrpc_mmap_free(ctx->maps[j], 0);
 				}
@@ -2976,7 +2982,7 @@ static int get_args(uint32_t kernel, struct smq_invoke_ctx *ctx)
 			} else {
 				/* map already freed by some other call */
 				mutex_unlock(&ctx->fl->map_mutex);
-				pr_err("could not find map associated with dma handle fd %d\n",
+				ADSPRPC_ERR("could not find map associated with dma handle fd %d\n",
 					ctx->fds[i]);
 				goto bail;
 			}

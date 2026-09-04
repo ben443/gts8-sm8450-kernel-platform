@@ -1854,7 +1854,7 @@ int isolate_lru_page(struct page *page)
 	int ret = -EBUSY;
 
 	VM_BUG_ON_PAGE(!page_count(page), page);
-	WARN_RATELIMIT(PageTail(page), "trying to isolate tail page");
+	/* WARN_RATELIMIT(PageTail(page), "trying to isolate tail page"); */
 
 	if (PageLRU(page)) {
 		pg_data_t *pgdat = page_pgdat(page);
@@ -2484,7 +2484,7 @@ static int notify_app_launch_started(void)
 	atomic_notifier_call_chain(&am_app_launch_notifier, 1, NULL);
 #if IS_ENABLED(CONFIG_ZRAM)
 	if (zram_oem_fn)
-		zram_oem_fn(ZRAM_APP_LAUNCH_NOTIFY, NULL, 1);
+		zram_oem_fn_nocfi(ZRAM_APP_LAUNCH_NOTIFY, NULL, 1);
 #endif
 	return 0;
 }
@@ -2495,7 +2495,7 @@ static int notify_app_launch_finished(void)
 	atomic_notifier_call_chain(&am_app_launch_notifier, 0, NULL);
 #if IS_ENABLED(CONFIG_ZRAM)
 	if (zram_oem_fn)
-		zram_oem_fn(ZRAM_APP_LAUNCH_NOTIFY, NULL, 0);
+		zram_oem_fn_nocfi(ZRAM_APP_LAUNCH_NOTIFY, NULL, 0);
 #endif
 	return 0;
 }
@@ -2932,7 +2932,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 /* Use reclaim/compaction for costly allocs or under memory pressure */
 static bool in_reclaim_compaction(struct scan_control *sc)
 {
-	if (IS_ENABLED(CONFIG_COMPACTION) && sc->order &&
+	if (gfp_compaction_allowed(sc->gfp_mask) && sc->order &&
 			(sc->order > PAGE_ALLOC_COSTLY_ORDER ||
 			 sc->priority < DEF_PRIORITY - 2))
 		return true;
@@ -3265,6 +3265,9 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 {
 	unsigned long watermark;
 	enum compact_result suitable;
+
+	if (!gfp_compaction_allowed(sc->gfp_mask))
+		return false;
 
 	suitable = compaction_suitable(zone, sc->order, 0, sc->reclaim_idx);
 	if (suitable == COMPACT_SUCCESS)
