@@ -1238,8 +1238,12 @@ int cfg80211_set_monitor_channel(struct cfg80211_registered_device *rdev,
 {
 	if (!rdev->ops->set_monitor_channel)
 		return -EOPNOTSUPP;
-	if (!cfg80211_has_monitors_only(rdev))
-		return -EBUSY;
+	/*
+	 * NetHunter: allow the monitor channel to be changed even when
+	 * non-monitor interfaces are active on the device. Required for
+	 * tools such as airodump-ng / aireplay-ng to hop channels while a
+	 * managed STA vif is up.
+	 */
 
 	return rdev_set_monitor_channel(rdev, chandef);
 }
