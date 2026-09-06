@@ -32,9 +32,16 @@ FLAG=0
 endif
 endif
 
-$(info kperfmon_DUMMY="$(shell cp -f $(srctree)/../../system/core/liblog/include/log/perflog.h  $(srctree)/include/linux/)")
-$(info kperfmon_DUMMY="$(shell cp -f $(srctree)/../../system/logging/liblog/include/log/perflog.h  $(srctree)/include/linux/)")
-$(info kperfmon_DUMMY="$(shell cp -f $(srctree)/../system/core/liblog/include/log/perflog.h  $(srctree)/include/linux/)")
+KPERFMON_PERFLOG_SRC := $(firstword $(wildcard \
+	$(srctree)/../../system/core/liblog/include/log/perflog.h \
+	$(srctree)/../../system/logging/liblog/include/log/perflog.h \
+	$(srctree)/../system/core/liblog/include/log/perflog.h))
+
+ifneq ($(KPERFMON_PERFLOG_SRC),)
+$(info kperfmon_DUMMY="$(shell cp -f $(KPERFMON_PERFLOG_SRC) $(srctree)/include/linux/)")
+else
+$(info kperfmon_DUMMY="perflog.h source not found under Android sibling paths; using local copy if present.")
+endif
 
 ifneq ($(shell [ -e $(srctree)/drivers/kperfmon/perflog.h ] && echo exist), exist)
 FLAG=0

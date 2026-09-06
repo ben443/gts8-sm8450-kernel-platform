@@ -2349,7 +2349,7 @@ static int iris_hfi_session_send(void *sess,
 		struct eva_kmd_hfi_packet *in_pkt)
 {
 	int rc = 0;
-	struct eva_kmd_hfi_packet pkt;
+	struct eva_kmd_hfi_packet *pkt;
 	struct cvp_hal_session *session = sess;
 	struct iris_hfi_device *device;
 
@@ -2357,6 +2357,10 @@ static int iris_hfi_session_send(void *sess,
 		dprintk(CVP_ERR, "invalid session");
 		return -ENODEV;
 	}
+
+	pkt = kzalloc(sizeof(*pkt), GFP_KERNEL);
+	if (!pkt)
+		return -ENOMEM;
 
 	device = session->device;
 	mutex_lock(&device->lock);
@@ -2366,20 +2370,19 @@ static int iris_hfi_session_send(void *sess,
 		goto err_send_pkt;
 	}
 	rc = call_hfi_pkt_op(device, session_send,
-			&pkt, session, in_pkt);
+			pkt, session, in_pkt);
 	if (rc) {
 		dprintk(CVP_ERR,
 				"failed to create pkt\n");
 		goto err_send_pkt;
 	}
 
-	if (__iface_cmdq_write(session->device, &pkt))
+	if (__iface_cmdq_write(session->device, pkt))
 		rc = -ENOTEMPTY;
 
 err_send_pkt:
 	mutex_unlock(&device->lock);
-	return rc;
-
+	kfree(pkt);
 	return rc;
 }
 
@@ -4815,4 +4818,3 @@ int cvp_iris_hfi_initialize(struct cvp_hfi_device *hdev, u32 device_id,
 err_iris_hfi_init:
 	return rc;
 }
-

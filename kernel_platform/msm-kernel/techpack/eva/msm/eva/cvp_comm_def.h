@@ -7,6 +7,7 @@
 #define _MSM_COMM_DEF_H_
 
 #include <linux/types.h>
+#include <linux/kconfig.h>
 
 enum op_mode {
 	OP_NORMAL,
@@ -23,8 +24,13 @@ enum queue_state {
 	QUEUE_INVALID,
 };
 
-#ifdef CONFIG_EVA_WAIPIO
+#if defined(CONFIG_EVA_WAIPIO) && \
+	(IS_REACHABLE(CONFIG_MSM_GLOBAL_SYNX) || \
+	 IS_REACHABLE(CONFIG_MSM_GLOBAL_SYNX_V2))
 #define CVP_SYNX_ENABLED 1
+#endif
+
+#ifdef CONFIG_EVA_WAIPIO
 #define CVP_MMRM_ENABLED 1
 #define CVP_FASTRPC_ENABLED 1
 #define CVP_MINIDUMP_ENABLED 1

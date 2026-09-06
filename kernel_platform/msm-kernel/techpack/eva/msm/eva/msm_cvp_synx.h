@@ -44,6 +44,16 @@ enum cvp_synx_type {
 	CVP_INVALID_SYNX,
 };
 
+#ifndef SYNX_STATE_SIGNALED_SUCCESS
+#define SYNX_STATE_SIGNALED_SUCCESS 2
+#endif
+#ifndef SYNX_STATE_SIGNALED_ERROR
+#define SYNX_STATE_SIGNALED_ERROR 3
+#endif
+#ifndef SYNX_STATE_SIGNALED_CANCEL
+#define SYNX_STATE_SIGNALED_CANCEL 4
+#endif
+
 #ifdef CVP_SYNX_ENABLED
 int cvp_sess_init_synx(struct msm_cvp_inst *inst);
 int cvp_sess_deinit_synx(struct msm_cvp_inst *inst);
