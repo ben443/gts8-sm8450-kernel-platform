@@ -815,15 +815,13 @@ ieee80211_tx_h_sequence(struct ieee80211_tx_data *tx)
 
 	/*
 	 * Packet injection may want to control the sequence number.
-	 * If the frame was injected (IEEE80211_TX_CTL_INJECTED) and the
-	 * monitor is not in cook-frames mode, skip renumbering and force
-	 * NO_ACK so mac80211 does not retry frames whose ACKing is the
-	 * responsibility of the injecting application (aircrack-ng et al).
+	 * If the frame was injected via a monitor interface and the
+	 * monitor is not in cook-frames mode, skip renumbering.
 	 */
 	if (unlikely((info->flags & IEEE80211_TX_CTL_INJECTED) &&
+		     !(info->flags & IEEE80211_TX_INTFL_NL80211_FRAME_TX) &&
+		     tx->sdata->vif.type == NL80211_IFTYPE_MONITOR &&
 		     !(tx->sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES))) {
-		if (!ieee80211_has_morefrags(hdr->frame_control))
-			info->flags |= IEEE80211_TX_CTL_NO_ACK;
 		return TX_CONTINUE;
 	}
 
