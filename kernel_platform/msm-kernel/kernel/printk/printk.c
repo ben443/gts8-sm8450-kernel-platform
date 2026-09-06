@@ -697,8 +697,54 @@ int devkmsg_emit(int facility, int level, const char *fmt, ...)
 	return r;
 }
 
+static bool module_init_done_msg(const char *line, const char *match_str)
+{
+	const char *c;
+	int matched;
+
+	for (c = line, matched = 0; *c && match_str[matched]; c++) {
+		if (match_str[matched] == '#') {
+			if (*c >= '0' && *c <= '9')
+				continue;
+			matched++;
+		}
+
+		if (*c != match_str[matched++])
+			return false;
+	}
+
+	/* Check that the whole string was matched */
+	return !match_str[matched];
+}
+
+static void check_modules_init_done(const char *line)
+{
+	static const char *const init_done_msgs[] = {
+		"init: Loaded # modules from",
+		"init: Loaded # kernel modules took"
+	};
+	int i;
+
+	/*
+	 * Android emits, e.g., "init: Loaded 195 modules from /lib/modules"
+	 * after its finished loading all modules. For integrated modules, use
+	 * this as a signal to know when the big pile of modules is finished
+	 * loading in order to kick off probing all of those modules' drivers.
+	 */
+	for (i = 0; i < ARRAY_SIZE(init_done_msgs); i++) {
+		if (module_init_done_msg(line, init_done_msgs[i]))
+			break;
+	}
+
+	if (i == ARRAY_SIZE(init_done_msgs))
+		return;
+
+	integrated_module_load_end();
+}
+
 static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 {
+	bool check_integrated_modules = false;
 	char *buf, *line;
 	int level = default_message_loglevel;
 	int facility = 1;	/* LOG_USER */
@@ -710,6 +756,13 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 	if (!user || len > LOG_LINE_MAX)
 		return -EINVAL;
 
+	/* We need to see Android's message that it's done loading modules */
+	if (IS_ENABLED(CONFIG_INTEGRATE_MODULES) && is_global_init(current) &&
+	    integrated_module_load_in_progress()) {
+		check_integrated_modules = true;
+		goto skip_checks;
+	}
+
 	/* Ignore when user logging is disabled. */
 	if (devkmsg_log & DEVKMSG_LOG_MASK_OFF)
 		return len;
@@ -720,6 +773,7 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			return ret;
 	}
 
+skip_checks:
 	buf = kmalloc(len+1, GFP_KERNEL);
 	if (buf == NULL)
 		return -ENOMEM;
@@ -754,6 +808,9 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 			line = endp;
 		}
 	}
+
+	if (unlikely(check_integrated_modules))
+		check_modules_init_done(line);
 
 	devkmsg_emit(facility, level, "%s", line);
 	kfree(buf);
@@ -1873,6 +1930,12 @@ static int console_trylock_spinning(void)
 	 */
 	mutex_acquire(&console_lock_dep_map, 0, 1, _THIS_IP_);
 
+	/*
+	 * Update @console_may_schedule for trylock because the previous
+	 * owner may have been schedulable.
+	 */
+	console_may_schedule = 0;
+
 	return 1;
 }
 
@@ -2447,6 +2510,7 @@ void console_unlock(void)
 	bool do_cond_resched, retry;
 	struct printk_info info;
 	struct printk_record r;
+	bool locked = false;
 
 	if (console_suspended) {
 		up_console_sem();
@@ -2489,7 +2553,18 @@ again:
 		size_t len;
 
 		printk_safe_enter_irqsave(flags);
-		raw_spin_lock(&logbuf_lock);
+		if(oops_in_progress) {
+			int cnt = 10000;
+			//FIXME: trying to spinlock for 10ms, deadlock by recursive lock suspected if it fails to lock
+			while(!locked && --cnt) {
+				locked = raw_spin_trylock(&logbuf_lock);
+				udelay(1);
+			}
+		}
+		else {
+			raw_spin_lock(&logbuf_lock);
+			locked = true;
+		}
 skip:
 		if (!prb_read_valid(prb, console_seq, &r))
 			break;
@@ -2533,7 +2608,10 @@ skip:
 				console_msg_format & MSG_FORMAT_SYSLOG,
 				printk_time);
 		console_seq++;
-		raw_spin_unlock(&logbuf_lock);
+		if(locked) {
+			raw_spin_unlock(&logbuf_lock);
+			locked = false;
+		}
 
 		/*
 		 * While actively printing out messages, if another printk()
@@ -2560,7 +2638,10 @@ skip:
 
 	console_locked = 0;
 
-	raw_spin_unlock(&logbuf_lock);
+	if(locked) {
+		raw_spin_unlock(&logbuf_lock);
+		locked = false;
+	}
 
 	up_console_sem();
 
@@ -2570,9 +2651,23 @@ skip:
 	 * there's a new owner and the console_unlock() from them will do the
 	 * flush, no worries.
 	 */
-	raw_spin_lock(&logbuf_lock);
+
+	if(oops_in_progress) {
+		int cnt = 10000;
+		while(!locked && --cnt) {
+			locked = raw_spin_trylock(&logbuf_lock);
+			udelay(1);
+		}
+	}
+	else {
+		raw_spin_lock(&logbuf_lock);
+		locked = true;
+	}
 	retry = prb_read_valid(prb, console_seq, NULL);
-	raw_spin_unlock(&logbuf_lock);
+	if(locked) {
+		raw_spin_unlock(&logbuf_lock);
+		locked = false;
+	}
 	printk_safe_exit_irqrestore(flags);
 
 	if (retry && console_trylock())
@@ -2699,6 +2794,21 @@ static int __init keep_bootcon_setup(char *str)
 
 early_param("keep_bootcon", keep_bootcon_setup);
 
+static int console_call_setup(struct console *newcon, char *options)
+{
+	int err;
+
+	if (!newcon->setup)
+		return 0;
+
+	/* Synchronize with possible boot console. */
+	console_lock();
+	err = newcon->setup(newcon, options);
+	console_unlock();
+
+	return err;
+}
+
 /*
  * This is called by register_console() to try to match
  * the newly registered console with any of the ones selected
@@ -2708,7 +2818,8 @@ early_param("keep_bootcon", keep_bootcon_setup);
  * Care need to be taken with consoles that are statically
  * enabled such as netconsole
  */
-static int try_enable_new_console(struct console *newcon, bool user_specified)
+static int try_enable_preferred_console(struct console *newcon,
+					bool user_specified)
 {
 	struct console_cmdline *c;
 	int i, err;
@@ -2733,8 +2844,8 @@ static int try_enable_new_console(struct console *newcon, bool user_specified)
 			if (_braille_register_console(newcon, c))
 				return 0;
 
-			if (newcon->setup &&
-			    (err = newcon->setup(newcon, c->options)) != 0)
+			err = console_call_setup(newcon, c->options);
+			if (err)
 				return err;
 		}
 		newcon->flags |= CON_ENABLED;
@@ -2754,6 +2865,23 @@ static int try_enable_new_console(struct console *newcon, bool user_specified)
 		return 0;
 
 	return -ENOENT;
+}
+
+/* Try to enable the console unconditionally */
+static void try_enable_default_console(struct console *newcon)
+{
+	if (newcon->index < 0)
+		newcon->index = 0;
+
+	if (console_call_setup(newcon, NULL) != 0)
+		return;
+
+	newcon->flags |= CON_ENABLED;
+
+	if (newcon->device) {
+		newcon->flags |= CON_CONSDEV;
+		has_preferred_console = true;
+	}
 }
 
 /*
@@ -2812,25 +2940,15 @@ void register_console(struct console *newcon)
 	 *	didn't select a console we take the first one
 	 *	that registers here.
 	 */
-	if (!has_preferred_console) {
-		if (newcon->index < 0)
-			newcon->index = 0;
-		if (newcon->setup == NULL ||
-		    newcon->setup(newcon, NULL) == 0) {
-			newcon->flags |= CON_ENABLED;
-			if (newcon->device) {
-				newcon->flags |= CON_CONSDEV;
-				has_preferred_console = true;
-			}
-		}
-	}
+	if (!has_preferred_console)
+		try_enable_default_console(newcon);
 
 	/* See if this console matches one we selected on the command line */
-	err = try_enable_new_console(newcon, true);
+	err = try_enable_preferred_console(newcon, true);
 
 	/* If not, try to match against the platform default(s) */
 	if (err == -ENOENT)
-		err = try_enable_new_console(newcon, false);
+		err = try_enable_preferred_console(newcon, false);
 
 	/* printk() messages are not printed to the Braille console. */
 	if (err || newcon->flags & CON_BRL)

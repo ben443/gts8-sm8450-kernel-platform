@@ -814,12 +814,18 @@ ieee80211_tx_h_sequence(struct ieee80211_tx_data *tx)
 	int tid;
 
 	/*
-	 * Packet injection may want to control the sequence
-	 * number, if we have no matching interface then we
-	 * neither assign one ourselves nor ask the driver to.
+	 * Packet injection may want to control the sequence number.
+	 * If the frame was injected (IEEE80211_TX_CTL_INJECTED) and the
+	 * monitor is not in cook-frames mode, skip renumbering and force
+	 * NO_ACK so mac80211 does not retry frames whose ACKing is the
+	 * responsibility of the injecting application (aircrack-ng et al).
 	 */
-	if (unlikely(info->control.vif->type == NL80211_IFTYPE_MONITOR))
+	if (unlikely((info->flags & IEEE80211_TX_CTL_INJECTED) &&
+		     !(tx->sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES))) {
+		if (!ieee80211_has_morefrags(hdr->frame_control))
+			info->flags |= IEEE80211_TX_CTL_NO_ACK;
 		return TX_CONTINUE;
+	}
 
 	if (unlikely(ieee80211_is_ctl(hdr->frame_control)))
 		return TX_CONTINUE;
@@ -2027,7 +2033,13 @@ void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
 		}
 	}
 
-	ieee80211_set_qos_hdr(sdata, skb);
+	/*
+	 * NetHunter: don't overwrite the QoS header for monitor-mode
+	 * transmits; injected radiotap frames may carry a user-crafted
+	 * QoS control field that must reach the driver intact.
+	 */
+	if (likely(info->control.vif->type != NL80211_IFTYPE_MONITOR))
+		ieee80211_set_qos_hdr(sdata, skb);
 	ieee80211_tx(sdata, sta, skb, false);
 }
 
@@ -2959,7 +2971,7 @@ void ieee80211_check_fast_xmit(struct sta_info *sta)
 	    sdata->vif.type == NL80211_IFTYPE_STATION)
 		goto out;
 
-	if (!test_sta_flag(sta, WLAN_STA_AUTHORIZED))
+	if (!test_sta_flag(sta, WLAN_STA_AUTHORIZED) || !sta->uploaded)
 		goto out;
 
 	if (test_sta_flag(sta, WLAN_STA_PS_STA) ||
@@ -3721,6 +3733,7 @@ begin:
 			goto begin;
 
 		skb = __skb_dequeue(&tx.skbs);
+		info = IEEE80211_SKB_CB(skb);
 
 		if (!skb_queue_empty(&tx.skbs)) {
 			spin_lock_bh(&fq->lock);
@@ -3765,7 +3778,7 @@ begin:
 	}
 
 encap_out:
-	IEEE80211_SKB_CB(skb)->control.vif = vif;
+	info->control.vif = vif;
 
 	if (vif &&
 	    wiphy_ext_feature_isset(local->hw.wiphy, NL80211_EXT_FEATURE_AQL)) {

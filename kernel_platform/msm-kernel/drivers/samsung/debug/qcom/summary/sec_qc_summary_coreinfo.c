@@ -93,7 +93,7 @@ static void __summary_coreinfo_init_dbg_apps(
 	dbg_apss->coreinfo.coreinfo_size = (uintptr_t)&summary_coreinfo_size;
 	dbg_apss->coreinfo.coreinfo_note = (uintptr_t)summary_coreinfo_note;
 
-	pr_info("coreinfo_data=0x%llx\n", dbg_apss->coreinfo.coreinfo_data);
+	pr_info("coreinfo_data=0x%pK\n", (void *)dbg_apss->coreinfo.coreinfo_data);
 }
 
 
@@ -146,7 +146,7 @@ static void __summary_coreinfo_append_module_data(
 #else
 	QC_SUMMARY_COREINFO_KALLSYMS(drvdata, mod_tree);
 #endif
-
+#ifdef CONFIG_MODULES
 	QC_SUMMARY_COREINFO_OFFSET(mod_tree_root, root);
 	QC_SUMMARY_COREINFO_OFFSET(mod_tree_root, addr_min);
 	QC_SUMMARY_COREINFO_OFFSET(mod_tree_root, addr_max);
@@ -171,6 +171,7 @@ static void __summary_coreinfo_append_module_data(
 	QC_SUMMARY_COREINFO_OFFSET(latch_tree_root, seq);
 	QC_SUMMARY_COREINFO_OFFSET(latch_tree_root, tree);
 	QC_SUMMARY_COREINFO_OFFSET(seqcount, sequence);
+#endif /* CONFIG_MODULES */
 }
 
 int __qc_summary_coreinfo_init(struct builder *bd)

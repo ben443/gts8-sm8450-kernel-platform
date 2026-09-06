@@ -703,7 +703,7 @@ static int __read_queue(struct cvp_iface_q_info *qinfo, u8 *packet,
 	u32 *read_ptr;
 	u32 receive_request = 0;
 	u32 read_idx, write_idx;
-		int rc = 0;
+	int rc = 0;
 
 	if (!qinfo || !packet || !pb_tx_req_is_set) {
 		dprintk(CVP_ERR, "Invalid Params\n");
@@ -793,6 +793,12 @@ static int __read_queue(struct cvp_iface_q_info *qinfo, u8 *packet,
 					(u8 *)qinfo->q_array.align_virtual_addr,
 					new_read_idx << 2);
 		}
+		/*
+		 * Copy back the validated size to avoid security issue. As we are reading
+		 * the packet from a shared queue, there is a possibility to get the
+		 * packet->size data corrupted of shared queue by mallicious FW.
+		 */
+		*((u32 *) packet) = packet_size_in_words << 2;
 	} else {
 		dprintk(CVP_WARN,
 			"BAD packet received, read_idx: %#x, pkt_size: %d\n",
@@ -2441,7 +2447,7 @@ static int iris_hfi_session_send(void *sess,
 		struct cvp_kmd_hfi_packet *in_pkt)
 {
 	int rc = 0;
-	struct cvp_kmd_hfi_packet pkt;
+	struct cvp_kmd_hfi_packet *pkt;
 	struct cvp_hal_session *session = sess;
 	struct iris_hfi_device *device;
 
@@ -2449,6 +2455,10 @@ static int iris_hfi_session_send(void *sess,
 		dprintk(CVP_ERR, "invalid session");
 		return -ENODEV;
 	}
+
+	pkt = kzalloc(sizeof(*pkt), GFP_KERNEL);
+	if (!pkt)
+		return -ENOMEM;
 
 	device = session->device;
 	mutex_lock(&device->lock);
@@ -2458,20 +2468,19 @@ static int iris_hfi_session_send(void *sess,
 		goto err_send_pkt;
 	}
 	rc = call_hfi_pkt_op(device, session_send,
-			&pkt, session, in_pkt);
+			pkt, session, in_pkt);
 	if (rc) {
 		dprintk(CVP_ERR,
 				"failed to create pkt\n");
 		goto err_send_pkt;
 	}
 
-	if (__iface_cmdq_write(session->device, &pkt))
+	if (__iface_cmdq_write(session->device, pkt))
 		rc = -ENOTEMPTY;
 
 err_send_pkt:
 	mutex_unlock(&device->lock);
-	return rc;
-
+	kfree(pkt);
 	return rc;
 }
 
@@ -2729,17 +2738,19 @@ skip_power_off:
 static void __process_sys_error(struct iris_hfi_device *device)
 {
 	struct cvp_hfi_sfr_struct *vsfr = NULL;
+	u32 sfr_buf_size = 0;
 
 	vsfr = (struct cvp_hfi_sfr_struct *)device->sfr.align_virtual_addr;
-	if (vsfr) {
-		void *p = memchr(vsfr->rg_data, '\0', vsfr->bufSize);
+	sfr_buf_size = vsfr->bufSize;
+	if (vsfr && sfr_buf_size < ALIGNED_SFR_SIZE) {
+		void *p = memchr(vsfr->rg_data, '\0', sfr_buf_size);
 		/*
 		 * SFR isn't guaranteed to be NULL terminated
 		 * since SYS_ERROR indicates that Iris is in the
 		 * process of crashing.
 		 */
 		if (p == NULL)
-			vsfr->rg_data[vsfr->bufSize - 1] = '\0';
+			vsfr->rg_data[sfr_buf_size - 1] = '\0';
 
 		dprintk(CVP_ERR, "SFR Message from FW: %s\n",
 				vsfr->rg_data);
@@ -4722,4 +4733,3 @@ int cvp_iris_hfi_initialize(struct cvp_hfi_device *hdev, u32 device_id,
 err_iris_hfi_init:
 	return rc;
 }
-

@@ -11,6 +11,7 @@
 #include <linux/syscalls.h>
 #include <linux/mempolicy.h>
 #include <linux/page-isolation.h>
+#include <linux/pgsize_migration.h>
 #include <linux/page_idle.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/hugetlb.h>
@@ -174,7 +175,7 @@ success:
 	 * vm_flags is protected by the mmap_lock held in write mode.
 	 */
 	vm_write_begin(vma);
-	WRITE_ONCE(vma->vm_flags, new_flags);
+	WRITE_ONCE(vma->vm_flags, vma_pad_fixup_flags(vma, new_flags));
 	vm_write_end(vma);
 
 out_convert_errno:
@@ -652,7 +653,7 @@ static int madvise_writeback_pte_range(pmd_t *pmd, unsigned long addr,
 			continue;
 		if (swp_swapcount(entry) > 1)
 			continue;
-		zram_oem_fn(ZRAM_ADD_TO_WRITEBACK_LIST, list, swp_offset(entry));
+		zram_oem_fn_nocfi(ZRAM_ADD_TO_WRITEBACK_LIST, list, swp_offset(entry));
 	}
 	pte_unmap_unlock(orig_pte, ptl);
 	cond_resched();
@@ -680,7 +681,7 @@ static long madvise_writeback(struct vm_area_struct *vma,
 	if (!can_madv_lru_vma(vma))
 		return 0;
 
-	if (!can_do_pageout(vma))
+	if (!vma_is_anonymous(vma))
 		return 0;
 
 	if (am_app_launch)
@@ -725,7 +726,7 @@ static int madvise_prefetch_pte_range(pmd_t *pmd, unsigned long start,
 		if (unlikely(non_swap_entry(entry)))
 			continue;
 
-		zram_oem_fn(ZRAM_PREFETCH_ENTRY, NULL, swp_offset(entry));
+		zram_oem_fn_nocfi(ZRAM_PREFETCH_ENTRY, NULL, swp_offset(entry));
 	}
 	return 0;
 }
@@ -1027,6 +1028,8 @@ static int madvise_free_single_vma(struct vm_area_struct *vma,
 static long madvise_dontneed_single_vma(struct vm_area_struct *vma,
 					unsigned long start, unsigned long end)
 {
+	madvise_vma_pad_pages(vma, start, end);
+
 	zap_page_range(vma, start, end - start);
 	return 0;
 }
@@ -1536,10 +1539,10 @@ SYSCALL_DEFINE5(process_madvise, int, pidfd, const struct iovec __user *, vec,
 	if (behavior == MADV_WRITEBACK) {
 		if (ret == 0) {
 			blk_start_plug(&plug);
-			ret = zram_oem_fn(ZRAM_WRITEBACK_LIST, &list, 0);
+			ret = zram_oem_fn_nocfi(ZRAM_WRITEBACK_LIST, &list, 0);
 			blk_finish_plug(&plug);
 		}
-		zram_oem_fn(ZRAM_FLUSH_WRITEBACK_BUFFER, &list, 0);
+		zram_oem_fn_nocfi(ZRAM_FLUSH_WRITEBACK_BUFFER, &list, 0);
 		if (ret < 0)
 			goto release_mm;
 	}
