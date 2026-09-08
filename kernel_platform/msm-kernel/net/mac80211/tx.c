@@ -2032,11 +2032,12 @@ void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
 	}
 
 	/*
-	 * NetHunter: don't overwrite the QoS header for monitor-mode
-	 * transmits; injected radiotap frames may carry a user-crafted
+	 * NetHunter: don't overwrite the QoS header for raw monitor
+	 * injection; injected radiotap frames may carry a user-crafted
 	 * QoS control field that must reach the driver intact.
 	 */
-	if (likely(info->control.vif->type != NL80211_IFTYPE_MONITOR))
+	if (likely(!(info->flags & IEEE80211_TX_CTL_INJECTED) ||
+		   (info->flags & IEEE80211_TX_INTFL_NL80211_FRAME_TX)))
 		ieee80211_set_qos_hdr(sdata, skb);
 	ieee80211_tx(sdata, sta, skb, false);
 }
