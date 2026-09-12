@@ -804,7 +804,9 @@ static int ieee80211_set_monitor_channel(struct wiphy *wiphy,
 	struct ieee80211_sub_if_data *sdata;
 	int ret = 0;
 
-	if (cfg80211_chandef_identical(&local->monitor_chandef, chandef))
+	if (cfg80211_chandef_identical(local->use_chanctx ?
+				       &local->monitor_chandef :
+				       &local->_oper_chandef, chandef))
 		return 0;
 
 	mutex_lock(&local->mtx);
